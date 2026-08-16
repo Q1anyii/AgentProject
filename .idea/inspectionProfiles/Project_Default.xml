@@ -1,0 +1,58 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="langchain" />
+          <option value="langchain-openai" />
+          <option value="langchain-community" />
+          <option value="llama-index" />
+          <option value="openai" />
+          <option value="anthropic" />
+          <option value="chromadb" />
+          <option value="pymongo" />
+          <option value="sentence-transformers" />
+          <option value="flagembedding" />
+          <option value="streamlit" />
+          <option value="fastapi" />
+          <option value="uvicorn" />
+          <option value="python-multipart" />
+          <option value="pandas" />
+          <option value="numpy" />
+          <option value="requests" />
+          <option value="httpx" />
+          <option value="arxiv" />
+          <option value="wikipedia" />
+          <option value="networkx" />
+          <option value="neo4j" />
+          <option value="python-dotenv" />
+          <option value="tiktoken" />
+          <option value="rich" />
+          <option value="jupyter" />
+          <option value="jupyterlab" />
+          <option value="notebook" />
+          <option value="ipykernel" />
+          <option value="nbconvert" />
+          <option value="pytest" />
+          <option value="pytest-cov" />
+          <option value="docker" />
+          <option value="pydantic" />
+          <option value="pydantic-settings" />
+          <option value="mkdocs-material" />
+          <option value="mkdocs-jupyter" />
+          <option value="aiofiles" />
+          <option value="pyyaml" />
+          <option value="tenacity" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="str.*" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

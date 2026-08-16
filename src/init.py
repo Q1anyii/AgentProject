@@ -1,5 +1,6 @@
 import os
 
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from langchain.chat_models.base import init_chat_model
 
 from langchain_community.document_loaders.text import TextLoader
@@ -15,9 +16,15 @@ model = init_chat_model(
 )
 
 embed_model = OpenAIEmbeddings(
- model="BAAI/bge-m3", # 免费模型 ID: BAAI/bge-m3
- base_url=os.getenv("SILICONFLOW_BASE_URL"),
- api_key=os.getenv("SILICONFLOW_API_KEY"),
+    model="BAAI/bge-m3", # 免费模型 ID: BAAI/bge-m3
+    base_url=os.getenv("SILICONFLOW_BASE_URL"),
+    api_key=os.getenv("SILICONFLOW_API_KEY")
+)
+
+embedding_function = OpenAIEmbeddingFunction(
+    api_key=os.getenv("SILICONFLOW_API_KEY"),
+    api_base=os.getenv("SILICONFLOW_BASE_URL"),
+    model_name="BAAI/bge-m3"
 )
 
 loader = TextLoader("../recourses/prompt/system_prompt.txt", encoding="utf-8")

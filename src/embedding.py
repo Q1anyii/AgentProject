@@ -1,19 +1,20 @@
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 
-from init import embed_model
+
+from init import embed_model, embedding_function
 import chromadb
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 
 embed_model = embed_model
-
 COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
-#  创建 Chroma 客户端
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
+# 3. 创建 Chroma 客户端和集合
+chroma_client = chromadb.PersistentClient(path="../recourses/chroma_db")
 collection = chroma_client.get_or_create_collection(
-    name = COLLECTION_NAME,
+    name=COLLECTION_NAME,
+    embedding_function=embedding_function,  # 与 RAG 侧保持一致
+    metadata={"hnsw:space": "cosine"}
 )
-
 
 
 with open("../recourses/FAQ/在线学习平台FAQ知识库（智能客服RAG专用）.md", "r", encoding="utf-8") as f:
@@ -48,7 +49,10 @@ vectors = embed_model.embed_documents([doc.page_content for doc in child_docs])
 
 collection.upsert(
     ids=ids,
-    embeddings=vectors,
     documents=[doc.page_content for doc in child_docs],
     metadatas=metadatas,  # 与 ids 等长
 )
+count = collection.count()
+print(count)
+if count:
+    print("信息嵌入成功")
