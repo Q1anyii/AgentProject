@@ -1,12 +1,28 @@
-# src/check_db.py
-from init import embedding_function
-import chromadb
+from langchain_core.messages.human import HumanMessage
 
-client = chromadb.PersistentClient("../recourses/chroma_db")
-collection = client.get_collection(name="FAQ_KNOWLEDGE_BASE", embedding_function=embedding_function)
+from graph import chat_graph
 
-result = collection.get(include=["documents", "metadatas"])
-print(f"共 {len(result['ids'])} 个块\n")
-for doc_id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"]):
-    print(f"--- {doc_id} | {meta.get('Header 1', '')} / {meta.get('Header 2', '')}")
-    print(doc[:60].replace("\n", " "), "\n")
+graph, pool = chat_graph()
+
+if __name__ == "__main__":
+    try:
+        print("==== LangGraph多轮对话，输入quit退出 ====")
+        # 演示用固定用户 ID；thread_id 决定短期记忆（会话内），user_id 决定长期记忆（跨会话）
+        user_id = "user_001"
+        while True:
+            user_text = input("\n你：")
+            if user_text.lower() == "quit":
+                break
+            config = {
+                "configurable": {
+                    "thread_id": user_id,  # 短期记忆：同一会话恢复历史
+                    "user_id": user_id,    # 长期记忆：按用户隔离档案
+                }
+            }
+            result = graph.invoke({"input_str": user_text}, config=config)
+            ai_msg = result["messages"][-1]
+            print(f"AI：{ai_msg.content}")
+        # 退出循环后再关闭连接池
+    finally:
+        pool.close()
+        print("bye")

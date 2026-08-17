@@ -1,0 +1,16 @@
+4. 同步 vs 异步、并发
+PostgresSaver / PostgresStore / graph.invoke 都是同步实现。最省事的做法：路由用普通 def 端点，FastAPI 会自动放进线程池执行，不会阻塞事件循环——第一版强烈建议这条路，正确性优先
+若后续要流式，再升级为 async def + StreamingResponse（SSE 逐 token 输出），内部用 graph.stream(stream_mode="messages") 包装进异步生成器
+并发安全无需额外处理：连接池自带多线程复用，PostgresSaver/PostgresStore 内部有锁，chroma client 查询线程安全，InMemoryCache 有锁保护——都是现成的
+注意 InMemoryCache 目前是模块级单例，抽到 graph.py 后在 lifespan 中创建实例即可
+5. 需要处理的细节
+thread_id 生成：uuid4()，避免多个请求互相串记忆
+CORS：若前端独立部署（Vue/React），加 CORSMiddleware
+错误处理：LLM 调用失败、检索异常等统一捕获，返回结构化错误（如 500 + {"detail": "..."}），loguru 日志照常
+多 worker 部署：uvicorn 多进程时，内存 cache、连接池各进程独立（无共享冲突）；chroma 的 SQLite 在 WAL 模式下多进程并发读安全，本项目只读场景没问题
+6. 可选进阶（后续再考虑）
+SSE 流式回答：体验更好，接口不变，响应变流
+鉴权：user_id 从 JWT/会话解析，杜绝客户端伪造
+LangServe 对比：langgraph 官方 langserve 包可直接把图暴露为 REST + playground，开箱即用但定制性弱（如历史/记忆查询端点还得自己写）；你的场景需要自定义端点，手写 FastAPI 更合适
+
+建议的改造顺序：① 抽 graph.py（纯搬移，不动逻辑）→ ② 写 main.py 的 lifespan + /api/chat + /health（跑通最小闭环）→ ③ 补 history / memory / delete 端点 → ④ 加 CORS、错误处理、日志 → ⑤ 可选流式。
