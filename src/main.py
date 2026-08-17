@@ -1,3 +1,4 @@
+import datetime
 import os
 from contextlib import asynccontextmanager
 
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="智能AI客服", lifespan=lifespan)
 
 from fastapi import Request
+import time
+
+#  bug修复(1.新建会话仍读取旧数据，2.刷新页面会话消失)
 
 
 @app.post("/api/chat/")
@@ -41,11 +45,10 @@ def chat(request: Request, request_body: ChatRequest):
     user_id = "user_001"
 
     config = {
-        "configurable": {
-            "thread_id": thread_id,  # 短期记忆：按请求传入的会话 ID 恢复历史
-            "user_id": user_id,  # 长期记忆：按用户隔离档案
-        }
+        "configurable": {"thread_id": thread_id, "user_id": user_id},
+        "metadata": {"user_id": user_id},  # 随 checkpoint 写入 metadata
     }
+
     result = graph.invoke({"input_str": query}, config=config)
     ai_msg = result["messages"][-1]
     return {"thread_id": thread_id, "answer": ai_msg.content}
@@ -62,7 +65,7 @@ def get_history_session(request: Request, thread_id: str):
     snapshot = graph.get_state(config)
     if not snapshot or len(snapshot) == 0:
         logger.error(f"会话:{thread_id}记录不存在")
-        return f"会话:{thread_id}记录不存在"
+        return {"code": 404, "message": f"会话:{thread_id}记录不存在"}
 
     state_data = snapshot.values
     history_messages = state_data.get("messages",[])
@@ -73,7 +76,8 @@ def get_history_session(request: Request, thread_id: str):
     for message in history_messages:
         history_msg.append(
             {
-                f"{message.type}: ": message.content
+              "role": f"{message.type}",
+              "content": message.content
             }
         )
     return history_msg
@@ -103,6 +107,31 @@ def delete_session_by_id(request: Request, thread_id: str):
     return {
         "title": f"删除会话:{thread_id}成功",
     }
+
+@app.get("/api/users/{user_id}/sessions")
+def get_sessions_by_user_id(request: Request, user_id: str):
+    pool = request.app.state.pool
+    checkpointer = PostgresSaver(pool)
+    # 1. 列出所有 checkpoint（跨所有 thread），按线程分组取最新
+    from langgraph.checkpoint.base import CheckpointTuple
+    latest_by_thread: dict[str, CheckpointTuple] = {}
+    for item in checkpointer.list(None):  # config=None 列出全部
+        tid = item.config["configurable"]["thread_id"]
+        if tid not in latest_by_thread:
+            latest_by_thread[tid] = item  # list() 按 checkpoint_id 升序返回
+
+    sessions = []
+    for tid, item in latest_by_thread.items():
+        messages = item.checkpoint["channel_values"].get("messages", [])
+        first_user = next((m for m in messages if m.type == "human"), None)
+        sessions.append({
+            "thread_id": tid,
+            "title": first_user.content[:20] if first_user else "新会话",
+            "last_updated": item.checkpoint["ts"],
+        })
+    sessions.sort(key=lambda s: s["last_updated"], reverse=True)
+    return sessions
+
 
 import psycopg
 from fastapi import Request

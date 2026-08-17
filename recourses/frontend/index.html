@@ -797,6 +797,9 @@
             sidebarOpen: false,
         };
 
+        // 演示用固定用户 ID（与后端 chat 端点保持一致）
+        const CURRENT_USER_ID = 'user_001';
+
         // ---- DOM 元素缓存 ----
         const $ = (id) => document.getElementById(id);
         const sidebar = $('sidebar');
@@ -878,6 +881,12 @@
         async function apiGetHistory(threadId) {
             const response = await fetch(`${API_BASE}/api/chat/${threadId}/history`);
             if (!response.ok) throw new Error(`获取历史失败: ${response.status}`);
+            return response.json();
+        }
+
+        async function apiGetSessions(userId) {
+            const response = await fetch(`${API_BASE}/api/users/${userId}/sessions`);
+            if (!response.ok) throw new Error(`获取会话列表失败: ${response.status}`);
             return response.json();
         }
 
@@ -1048,6 +1057,24 @@
         // ---- 业务逻辑 ----
 
         /**
+         * 从服务端加载历史会话列表（刷新页面后恢复侧边栏）
+         */
+        async function loadSessions() {
+            try {
+                const sessions = await apiGetSessions(CURRENT_USER_ID);
+                state.sessions = (sessions || []).map(s => ({
+                    id: s.thread_id,
+                    title: s.title || '新会话',
+                    messages: []
+                }));
+            } catch (err) {
+                state.sessions = [];
+                console.warn('加载会话列表失败:', err.message);
+            }
+            renderSessionList();
+        }
+
+        /**
          * 新建会话
          */
         function createNewSession() {
@@ -1100,23 +1127,15 @@
         }
 
         /**
-         * 解析历史记录格式
+         * 解析历史记录格式（后端返回 [{role, content}] 结构）
          */
         function parseHistory(history) {
             if (!Array.isArray(history)) return [];
-            const messages = [];
-            history.forEach(item => {
-                const keys = Object.keys(item);
-                keys.forEach(key => {
-                    const role = key.replace(': ', '').trim();
-                    messages.push({
-                        role: role === 'human' ? 'user' : 'assistant',
-                        content: item[key],
-                        time: formatTime()
-                    });
-                });
-            });
-            return messages;
+            return history.map(item => ({
+                role: item.role === 'human' ? 'user' : 'assistant',
+                content: item.content,
+                time: formatTime()
+            }));
         }
 
         /**
@@ -1277,9 +1296,12 @@
 
         // ---- 初始化 ----
 
-        function init() {
-            // 默认新建一个会话
-            createNewSession();
+        async function init() {
+            // 先从服务端恢复历史会话；无历史时再新建一个会话
+            await loadSessions();
+            if (state.sessions.length === 0) {
+                createNewSession();
+            }
 
             // 检查服务健康状态
             checkHealth();
