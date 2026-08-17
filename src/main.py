@@ -1,5 +1,3 @@
-import datetime
-import os
 from contextlib import asynccontextmanager
 
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -8,7 +6,7 @@ from loguru import logger
 from graph import build_chat_graph
 from fastapi import FastAPI
 from schemas import ChatRequest
-# 放最顶部
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -30,7 +28,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="智能AI客服", lifespan=lifespan)
 
 from fastapi import Request
-import time
 
 #  bug修复(1.新建会话仍读取旧数据，2.刷新页面会话消失)
 

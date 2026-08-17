@@ -961,6 +961,9 @@
          */
         function renderMessages() {
             if (state.messages.length === 0) {
+                // 清空消息区残留 DOM，避免旧会话消息残留在页面上
+                messagesWrapper.innerHTML = '';
+                messagesWrapper.appendChild(welcomeState);
                 welcomeState.style.display = 'block';
                 return;
             }
@@ -1078,11 +1081,15 @@
          * 新建会话
          */
         function createNewSession() {
+            // 回收空白会话：新建前移除所有从未发过消息的会话，避免反复点击“+”造成堆积
+            state.sessions = state.sessions.filter(s => !s.isBlank);
+
             const threadId = generateId();
             const session = {
                 id: threadId,
                 title: '新会话',
-                messages: []
+                messages: [],
+                isBlank: true  // 标记为空白会话（从未发过消息），后续可被回收
             };
             state.sessions.unshift(session);
             state.currentThreadId = threadId;
@@ -1186,6 +1193,8 @@
             if (session && session.title === '新会话') {
                 session.title = content.length > 20 ? content.slice(0, 20) + '...' : content;
             }
+            // 一旦发送消息，该会话不再是空白会话（不可被回收）
+            if (session) session.isBlank = false;
             if (session) session.messages = [...state.messages];
 
             // 清空输入框
