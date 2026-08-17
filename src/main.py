@@ -7,6 +7,10 @@ from loguru import logger
 from graph import build_chat_graph
 from fastapi import FastAPI
 from schemas import ChatRequest
+# 放最顶部
+from dotenv import load_dotenv
+load_dotenv()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

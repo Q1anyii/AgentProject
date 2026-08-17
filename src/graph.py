@@ -1,61 +1,228 @@
 import os
-from typing import Annotated, Optional
-from operator import add
+from functools import lru_cache
+from typing import Annotated, Optional, TypedDict, List, Dict, Any
 
+import chromadb
+from langchain_core.documents import Document
 from langgraph.cache.memory import InMemoryCache
-from langgraph.types import CachePolicy, Send
-from psycopg_pool import ConnectionPool
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.store.postgres import PostgresStore
+from langgraph.types import CachePolicy, Send
+from psycopg_pool import ConnectionPool
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
 from chromadb import QueryResult
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.constants import START, END
 from langgraph.graph.message import MessagesState
-import chromadb
 from langgraph.graph.state import StateGraph, CompiledStateGraph
 from loguru import logger
-from pydantic import Field
-from init import model, system_prompt, embedding_function
+from pydantic import Field, BaseModel
+from init import model, system_prompt, embedding_function, online_rerank
 
+client = chromadb.PersistentClient("../recourses/chroma_db")
+collection = client.get_collection(
+    name="FAQ_KNOWLEDGE_BASE",
+    embedding_function=embedding_function,
+)
+
+POSTGRESQL_DB_URL = os.getenv("POSTGRESQL_DB_URL")
+
+
+
+@lru_cache(maxsize=1)
+def query_rerank_graph():
+    logger.info("正在进行Query 改写 + 重排序")
+    class RAGState(TypedDict):
+        question: str
+        history: List[Dict[str, str]]  # 多轮对话历史，只用于 query 改写
+        rewritten_queries: List[str]  # 改写后的查询列表
+        merged_docs: List[Document]  # 多查询召回 + RRF 融合后的候选
+        reranked_docs: List[Document]  # 重排后的最终文档
+
+    class QueryRewriteResult(BaseModel):
+        main_query: str
+        sub_queries: List[str] = Field(default_factory=list)
+        keywords: List[str] = Field(default_factory=list)
+
+    REWRITE_PROMPT = """你是查询改写专家。根据对话历史，将用户问题改写成适合向量检索的独立查询。
+
+    要求：
+    1. 解决指代，如“他/它/这个/那个”必须替换成明确实体；
+    2. 多义词根据上下文补全限定词；
+    3. 生成 1 个主查询 + 2~3 个子查询，覆盖不同语义角度；
+    4. 再提取 3~5 个关键词。
+
+    对话历史：
+    {history}
+
+    用户当前问题：
+    {question}
+    """
+
+    def rewrite_query(state: RAGState) -> dict:
+        history_text = "\n".join(
+            f"{m['role']}: {m['content']}" for m in state.get("history", [])
+        )
+
+        prompt = REWRITE_PROMPT.format(
+            question=state["question"],
+            history=history_text or "无",
+        )
+
+        result = model.with_structured_output(QueryRewriteResult).invoke(prompt)
+
+        queries = [result.main_query] + result.sub_queries
+        logger.info(f"重新后问题:{queries}")
+        return {"rewritten_queries": queries}
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def rrf_fusion(results: List[List[Document]], k: int = 60) -> List[Document]:
+        scores = {}
+
+        for docs in results:
+            for rank, doc in enumerate(docs):
+                key = doc.metadata.get("id", doc.page_content)
+                if key not in scores:
+                    scores[key] = {"doc": doc, "score": 0.0}
+                scores[key]["score"] += 1.0 / (k + rank + 1)
+
+        return [
+            item["doc"]
+            for item in sorted(
+                scores.values(),
+                key=lambda x: x["score"],
+                reverse=True,
+            )
+        ]
+
+
+    def unpack_query_results(results: List[Any]) -> List[List[Document]]:
+        """
+        将 List[QueryResult] 拆解为 List[List[Document]]，
+        每个内层列表对应一个查询的文档列表。
+        """
+        all_query_docs = []
+
+        for result in results:
+            # 防御：某些版本/配置下 ChromaDB 会再包一层 list，先解包
+            while isinstance(result, list) and len(result) == 1:
+                result = result[0]
+
+            if not isinstance(result, dict):
+                logger.warning(f"Unexpected query result type: {type(result)}, value: {result[:200] if isinstance(result, (list, str)) else result}")
+                all_query_docs.append([])
+                continue
+
+            ids = result.get("ids", [])
+            documents = result.get("documents", [])
+            metadatas = result.get("metadatas", [])
+
+            # ChromaDB 返回的是 batch 嵌套结构：List[List[...]]
+            if ids and isinstance(ids[0], list):
+                for sub_ids, sub_docs, sub_metas in zip(ids, documents, metadatas):
+                    query_docs = []
+                    for i, doc_id in enumerate(sub_ids):
+                        meta = dict(sub_metas[i]) if i < len(sub_metas) else {}
+                        meta["id"] = doc_id
+                        text = sub_docs[i] if i < len(sub_docs) else ""
+                        query_docs.append(Document(page_content=text, metadata=meta))
+                    all_query_docs.append(query_docs)
+            else:
+                # 兜底：一维结构
+                query_docs = []
+                for i, doc_id in enumerate(ids):
+                    meta = dict(metadatas[i]) if i < len(metadatas) else {}
+                    meta["id"] = doc_id
+                    text = documents[i] if i < len(documents) else ""
+                    query_docs.append(Document(page_content=text, metadata=meta))
+                all_query_docs.append(query_docs)
+
+        return all_query_docs
+
+    def retrieve(state: RAGState) -> dict:
+        queries = state["rewritten_queries"]
+        top_k = 8
+
+        with ThreadPoolExecutor(max_workers=len(queries)) as ex:
+            results = list(
+                ex.map(
+                    lambda q: collection.query(query_texts=[q], n_results=top_k),
+                    queries,
+                )
+            )
+
+        docs_per_query = unpack_query_results(results)
+        merged_docs = rrf_fusion(docs_per_query)
+        return {"merged_docs": merged_docs}
+
+    def rerank(state: RAGState) -> dict:
+        docs = state["merged_docs"]
+        if not docs:
+            return {"reranked_docs": []}
+
+        # 用改写后的主查询做精排，通常比原始口语问题更稳定
+        query = state["rewritten_queries"][0]
+
+        results = online_rerank(query, [doc.page_content for doc in docs], top_n=10)
+        top_docs = [docs[r["index"]] for r in results]
+
+        return {"reranked_docs": top_docs}
+
+    builder = StateGraph(RAGState)
+
+    builder.add_node("rewrite", rewrite_query)
+    builder.add_node("retrieve", retrieve)
+    builder.add_node("rerank", rerank)
+
+    builder.add_edge(START, "rewrite")
+    builder.add_edge("rewrite", "retrieve")
+    builder.add_edge("retrieve", "rerank")
+    builder.add_edge("rerank",  END)
+
+    rerank_graph = builder.compile()
+    return rerank_graph
 
 def build_chat_graph() -> tuple[CompiledStateGraph, ConnectionPool]:
-    client = chromadb.PersistentClient("../recourses/chroma_db")
-    collection = client.get_collection(
-        name="FAQ_KNOWLEDGE_BASE",
-        embedding_function=embedding_function,
-    )
 
     class OverAllState(MessagesState):
         input_str: Annotated[str, Field(description="用户输入")]
-        retrieval_res: Annotated[Optional[QueryResult], "检索结果"] = None
+        retrieve_res: Annotated[Optional[QueryResult], "检索结果"] = None
         llm_output: Annotated[str, Field(description="模型输出")]
         needs_retrieval: Annotated[bool, Field(description="是否需要检索知识库")] = False
 
-    def retrieval_node(state: OverAllState) -> OverAllState:
+    def retrieve_node(state: OverAllState) -> OverAllState:
         input_str = state["input_str"]
         logger.info(f"执行知识库检索：{input_str}")
 
-        retrieval_res = collection.query(
-        query_texts=[input_str], # 查询文本
-        n_results=3                     # 返回最相似的两个结果
+        rerank_graph = query_rerank_graph()
+
+        history = [
+            {"role": "user" if m.type == "human" else "assistant", "content": m.content}
+            for m in state.get("messages", [])
+            if m.type in ("human", "ai")
+        ]
+
+        retrieve_res = rerank_graph.invoke({
+            "question": input_str,
+            "histroy": history
+            }
         )
+
         return {
-            "retrieval_res": retrieval_res
+            "retrieve_res": retrieve_res
         }
 
     def llm_node(state: OverAllState, config: RunnableConfig, store: BaseStore) -> OverAllState:
         input_str = state["input_str"]
-        retrieval_res = state.get("retrieval_res")
+        retrieval_res = state.get("retrieve_res")
 
         if retrieval_res is not None:
-            # 检索分支：只保留语义相关的检索结果（l2² < 1.0 约等于余弦相似度 > 0.5）
-            docs = retrieval_res["documents"][0] if retrieval_res["documents"] else []
-            distances = retrieval_res["distances"][0] if retrieval_res["distances"] else []
-            filtered = [(d, s) for d, s in zip(docs, distances) if s < 1.0]
-            if filtered:
-                context = "\n\n".join(f"[文档 {i + 1}] {doc}" for i, (doc, _) in enumerate(filtered))
+            # 检索分支：在线重排结果已按相关性降序，直接取文档文本
+            docs = [d.page_content for d in retrieval_res.get("reranked_docs", [])]
+            if docs:
+                context = "\n\n".join(f"[文档 {i + 1}] {doc}" for i, doc in enumerate(docs[:5]))
             else:
                 context = "（知识库中未检索到相关内容）"
             user_content = (
@@ -165,12 +332,12 @@ def build_chat_graph() -> tuple[CompiledStateGraph, ConnectionPool]:
             "messages": state.get("messages", []),  # 历史对话（短期记忆）
         }
         if state.get("needs_retrieval"):
-            return [Send("retrieval_node", payload)]
+            return [Send("retrieve_node", payload)]
         return [Send("llm_node", payload)]
 
     builder = StateGraph(state_schema=OverAllState)
     builder.add_node("classify_node", classify_node)
-    builder.add_node("retrieval_node", retrieval_node, cache_policy=CachePolicy(ttl=10))
+    builder.add_node("retrieve_node", retrieve_node, cache_policy=CachePolicy(ttl=10))
     builder.add_node("llm_node", llm_node)
     builder.add_node("memory_node", memory_node)
 
@@ -178,28 +345,36 @@ def build_chat_graph() -> tuple[CompiledStateGraph, ConnectionPool]:
     builder.add_conditional_edges(
         "classify_node",
         route,
-        ["retrieval_node", "llm_node"],
+        ["retrieve_node", "llm_node"],
     )
-    builder.add_edge("retrieval_node", "llm_node")
+    builder.add_edge("retrieve_node", "llm_node")
     builder.add_edge("llm_node", "memory_node")
     builder.add_edge("memory_node", END)
-
-    POSTGRESQL_DB_URL = os.getenv("POSTGRESQL_DB_URL")
 
     # 创建连接池（open=True 表示立即打开连接）
     # 必须开启 autocommit：迁移脚本含 CREATE INDEX CONCURRENTLY，不能在事务块中执行
     pool = ConnectionPool(
         conninfo=POSTGRESQL_DB_URL,
         kwargs={"autocommit": True},
+        min_size=1,
+        max_size=10,
+        timeout=5,  # 借连接 5 秒快速失败，不干等 30 秒
         open=True,
     )
+    try:
+        pool.check()
+    except Exception as e:
+        logger.error(f"数据库连接失败，请检查 .env 的 POSTGRESQL_DB_URL 与 PostgreSQL 服务")
+        logger.error(f"真实错误：{e}")
+        raise
 
     # 直接实例化 PostgresSaver（短期记忆：按 thread_id 恢复历史对话）
     checkpointer = PostgresSaver(pool)
-    checkpointer.setup()
 
     # PostgresStore（长期记忆：跨会话保存用户档案），与 checkpointer 共用连接池
     store = PostgresStore(pool)
+
+    checkpointer.setup()
     store.setup()
 
     graph = builder.compile(checkpointer=checkpointer, store=store, cache=InMemoryCache())
