@@ -1,3 +1,32 @@
+# ---- 环境变量（含 API 密钥，严禁提交） ----
 .env
-recourses/chroma_db/
 *.env
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+
+# ---- IDE 配置 ----
+.idea/
+*.iml
+.vscode/
+
+# ---- 本地数据（向量库，需重建，不入库） ----
+recourses/chroma_db/
+
+# ---- Jupyter 检查点 ----
+.ipynb_checkpoints/
+
+# ---- 操作系统文件 ----
+.DS_Store
+Thumbs.db
+
+# ---- 日志 / 临时文件 ----
+*.log
+*.tmp
