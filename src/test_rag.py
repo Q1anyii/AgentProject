@@ -191,13 +191,6 @@ pool = ConnectionPool(
     open=True,
 )
 
-# 直接实例化 PostgresSaver（短期记忆：按 thread_id 恢复历史对话）
-checkpointer = PostgresSaver(pool)
-checkpointer.setup()
-
-# PostgresStore（长期记忆：跨会话保存用户档案），与 checkpointer 共用连接池
-store = PostgresStore(pool)
-store.setup()
 
 graph = builder.compile(checkpointer=checkpointer, store=store, cache=InMemoryCache())
 
