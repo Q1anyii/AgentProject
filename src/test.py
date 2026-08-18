@@ -1,8 +1,8 @@
 from langchain_core.messages.human import HumanMessage
 
-from graph import chat_graph
+from graph import build_chat_graph
 
-graph, pool = chat_graph()
+graph, pool = build_chat_graph()
 
 if __name__ == "__main__":
     try:

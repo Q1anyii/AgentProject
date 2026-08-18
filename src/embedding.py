@@ -153,16 +153,21 @@ async def main():
         try:
             file_path = input("输入需要解析的文档路径: ").strip()
             source, category = input("输入 source 与 category（空格分隔）: ").split()
-            break
+            meta = Meta(source, category)
+
+            processor = EmbeddingProcessor()
+            count = await processor.aembed(file_path=file_path, meta=meta)
+            check = input(f"嵌入完成，共 {count} 条,是否继续嵌入？(y/n):")
+            if check == "y" :
+                continue
+            elif check == "n":
+                break
+            else:
+                logger.error("错误选择,视为推出")
+                break
         except ValueError as e:
             logger.error(f"路径或分类格式出错，重新输入{e}\n")
             continue
-
-    meta = Meta(source, category)
-
-    processor = EmbeddingProcessor()
-    count = await processor.aembed(file_path=file_path, meta=meta)
-    print(f"嵌入完成，共 {count} 条")
 
 
 if __name__ == "__main__":

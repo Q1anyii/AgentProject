@@ -52,3 +52,5 @@ def online_rerank(query: str, documents: list[str], top_n: int = 10) -> list[dic
     )
     resp.raise_for_status()
     return sorted(resp.json()["results"], key=lambda r: r["relevance_score"], reverse=True)
+
+COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
