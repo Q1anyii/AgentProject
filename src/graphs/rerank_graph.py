@@ -123,20 +123,55 @@ def build_rerank_graph(self: ChatService):  # ← 原 query_rerank_graph 逻辑�
         return all_query_docs
 
     def retrieve(state: RAGState) -> dict:
+        TOP_K = 5
+        DISTANCE_THRESHOLD = 0.3  # cosine distance阈值，小于则保留
+        # score阈值等价: SCORE_THRESHOLD = 1 - DISTANCE_THRESHOLD =0.7
+
         queries = state["rewritten_queries"]
-        top_k = 8
 
         with ThreadPoolExecutor(max_workers=len(queries)) as ex:
-            results = list(
+            raw_chroma_results = list(
                 ex.map(
-                    lambda q: collection.query(query_texts=[q], n_results=top_k),
+                    lambda q: collection.query(query_texts=[q], n_results=TOP_K),
                     queries,
                 )
             )
 
-        docs_per_query = unpack_query_results(results)
-        merged_docs = rrf_fusion(docs_per_query)
-        return {"merged_docs": merged_docs}
+            # 对每一个query的检索结果，先执行distance阈值过滤
+            filtered_results: List[Dict[str, Any]] = []
+            for res in raw_chroma_results:
+                # chroma collection.query 返回格式：{documents:[[...]], distances:[[...]], metadatas:[[...]], ids:[[...]]}
+                docs_list = res["documents"][0]
+                dists_list = res["distances"][0]
+                meta_list = res["metadatas"][0]
+                id_list = res["ids"][0]
+
+                keep_docs = []
+                keep_dists = []
+                keep_metas = []
+                keep_ids = []
+
+                for doc_text, dist, meta, doc_id in zip(docs_list, dists_list, meta_list, id_list):
+                    if dist < DISTANCE_THRESHOLD:
+                        meta["_distance"] = dist  # 埋入元数据，用于langsmith调试看距离
+                        keep_docs.append(doc_text)
+                        keep_dists.append(dist)
+                        keep_metas.append(meta)
+                        keep_ids.append(doc_id)
+
+                # 把过滤之后的结果重新组装成chroma相同结构，给unpack_query_results复用
+                filtered_results.append({
+                    "documents": [keep_docs],
+                    "distances": [keep_dists],
+                    "metadatas": [keep_metas],
+                    "ids": [keep_ids]
+                })
+
+            # 现在传给unpack的已经是过滤噪声之后的数据
+            docs_per_query = unpack_query_results(filtered_results)
+            merged_docs = rrf_fusion(docs_per_query)
+
+            return {"merged_docs": merged_docs}
 
     def rerank(state: RAGState) -> dict:
         docs = state["merged_docs"]

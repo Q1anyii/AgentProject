@@ -9,6 +9,7 @@ from langchain_community.document_loaders.text import TextLoader
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from loguru import logger
+import hashlib
 
 class Meta:
     """文档元数据：来源（source）与分类（category）。"""
@@ -16,6 +17,22 @@ class Meta:
     def __init__(self, source: str, category: str):
         self.source = source
         self.category = category
+
+def compute_doc_hash_with_meta(docs: list[Document]) -> list[str]:
+
+    ids = []
+    for doc in docs:
+        content = doc.page_content.strip().replace("\r\n", "\n").replace("\r", "\n")
+        # 挑选需要参与哈希的元数据，不要全部meta（时间、随机字段不要混入）
+        meta_keys = ["source", "file_name", "url"]
+        meta_part = []
+        for k in meta_keys:
+            meta_part.append(f"{k}:{doc.metadata.get(k, '')}")
+
+        raw = content + "\n" + "\n".join(meta_part)
+        ids.append(hashlib.sha256(raw.encode("utf‑8")).hexdigest())
+    return ids
+
 
 """
 EmbeddingProcessor（类）
@@ -114,7 +131,8 @@ class EmbeddingProcessor:
             logger.warning("没有可写入的文档，跳过入库")
             return 0
 
-        ids = [f"C{i}" for i in range(len(child_docs))]
+        ids = compute_doc_hash_with_meta(child_docs)
+
         metadatas = []
         for doc in child_docs:
             metadata = {"source": meta.source, "category": meta.category}
