@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from loguru import logger
-from graph import  ChatService
+from chat_service import  ChatService
 from fastapi import FastAPI
 from schemas import ChatRequest
 from fastapi.responses import StreamingResponse
@@ -16,7 +16,6 @@ async def lifespan(app: FastAPI):
     # ===== 启动阶段：yield 之前 =====
     logger.info("正在初始化 LangGraph 资源...")
     chat_service.open()
-
     logger.info("资源初始化完成")
     yield                                # ===== 应用运行期间（yield 挂起）=====
     # ===== 关闭阶段：yield 之后 =====
