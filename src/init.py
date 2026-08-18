@@ -33,7 +33,7 @@ embedding_function = OpenAIEmbeddingFunction(
     model_name="BAAI/bge-m3"
 )
 
-loader = TextLoader("../recourses/prompt/system_prompt.txt", encoding="utf-8")
+loader = TextLoader("../recourses/system_prompt/online_learning_platform_customer_temp.txt", encoding="utf-8")
 system_prompt = loader.load()[0].page_content
 
 def online_rerank(query: str, documents: list[str], top_n: int = 10) -> list[dict]:

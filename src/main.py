@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     chat_service.close(timeout=10)                         # 替代现在的 finally 逻辑
     logger.info("资源已释放")
 
-app = FastAPI(title="智能AI客服", lifespan=lifespan)
+app = FastAPI(title="澜语AI", lifespan=lifespan)
 
 @app.post("/api/chat/")
 async def chat(request_body: ChatRequest):

@@ -267,12 +267,12 @@ class ChatService:
 #             f"{m['role']}: {m['content']}" for m in state.get("history", [])
 #         )
 #
-#         prompt = REWRITE_PROMPT.format(
+#         system_prompt = REWRITE_PROMPT.format(
 #             question=state["question"],
 #             history=history_text or "无",
 #         )
 #
-#         result = model.with_structured_output(QueryRewriteResult).invoke(prompt)
+#         result = model.with_structured_output(QueryRewriteResult).invoke(system_prompt)
 #
 #         queries = [result.main_query] + result.sub_queries
 #         logger.info(f"重新后问题:{queries}")

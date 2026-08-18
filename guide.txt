@@ -149,3 +149,54 @@ async def chat_stream(...) 端点（原 /api/chat 升级）
         ├── async for (chunk, meta) in graph.astream(config, stream_mode="messages"):
         │   └── 每个 chunk 是 AIMessageChunk → yield "data: {json}\n\n"
         └── 结束后 yield "data: [DONE]\n\n"
+
+
+
+
+
+
+
+
+
+
+
+
+五、改进建议
+增加可观测性
+接入 LangSmith、Langfuse 或 OpenTelemetry，追踪多 Agent 执行链、Token 消耗、延迟和错误。
+
+建立评测集与在线指标
+离线评测：召回率、MRR、RAG 端到端准确率。
+在线指标：问题解决率、用户满意度、转人工率、平均响应时长。
+
+明确记忆机制
+
+短期记忆：Redis + 会话窗口，设置 TTL。
+
+长期记忆：数据库 + 向量库，记录用户画像、历史摘要、偏好。
+
+设计记忆更新策略：何时写入、何时压缩、如何避免过期信息污染。
+
+优化检索链路
+
+Embedding 缓存、FAQ 精确匹配优先。
+
+对 Reranker 做延迟和效果权衡，可考虑轻量级 Cross-Encoder 或先粗排后精排。
+
+问题重写可以用规则 + LLM 结合，避免所有 query 都重写增加延迟。
+
+完善工程化
+FastAPI 层增加鉴权、限流、请求校验、统一异常处理、健康检查。
+补充 Dockerfile、docker-compose、CI/CD、单元测试和对话回归测试。
+
+明确多 Agent 职责
+例如：
+
+路由 Agent：意图识别与分发
+
+检索 Agent：负责 RAG 与知识库查询
+
+客服 Agent：负责生成回答与多轮澄清
+
+记忆 Agent：负责记忆读写与摘要
+避免“为多 Agent 而多 Agent”。
