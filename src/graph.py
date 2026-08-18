@@ -1,6 +1,7 @@
 import asyncio
+import json
 import os
-from functools import lru_cache
+
 from pathlib import Path
 from typing import Annotated, Optional, TypedDict, List, Dict, Any
 
@@ -14,7 +15,7 @@ from psycopg_pool import ConnectionPool
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
 from chromadb import QueryResult
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage, AIMessageChunk
 from langgraph.constants import START, END
 from langgraph.graph.message import MessagesState
 from langgraph.graph.state import StateGraph, CompiledStateGraph
@@ -257,7 +258,6 @@ class ChatService:
         class OverAllState(MessagesState):
             input_str: Annotated[str, Field(description="用户输入")]
             retrieve_res: Annotated[Optional[QueryResult], "检索结果"] = None
-            llm_output: Annotated[str, Field(description="模型输出")]
             needs_retrieval: Annotated[bool, Field(description="是否需要检索知识库")] = False
 
         def retrieve_node(state: OverAllState) -> OverAllState:
@@ -272,7 +272,7 @@ class ChatService:
 
             retrieve_res = rerank_graph.invoke({
                 "question": input_str,
-                "histroy": history
+                "history": history
             }
             )
 
@@ -318,13 +318,16 @@ class ChatService:
             messages = [SystemMessage(content=system_content)] + list(history)
             messages.append(HumanMessage(content=user_content))
 
-            response = model.invoke(messages)
-            llm_output = response.content
+            # 流式生成：LangGraph 会通过 callback 机制自动捕获 model.stream 的每个 token，
+            # 以 stream_mode="messages" 输出（前端逐片累加即打字机效果）。
+            # 注意：节点不能返回生成器——langgraph 1.x 会把生成器当单条消息交给
+            # add_messages/_convert_to_message 转换，报 "Unsupported message type: generator"。
+            chunks = []
+            for chunk in model.stream(messages):
+                chunks.append(chunk)
+            ai_reply = AIMessage(content="".join(c.content for c in chunks if isinstance(c.content, str)))
 
-            return {
-                "llm_output": llm_output,
-                "messages": [HumanMessage(content=input_str), AIMessage(content=llm_output)],
-            }
+            return {"messages": [HumanMessage(content=input_str), ai_reply]}
 
         MEMORY_EXTRACT_PROMPT = """你是长期记忆管理器，负责维护用户档案。
 
@@ -352,12 +355,13 @@ class ChatService:
             item = store.get(namespace, "user_profile")
             old_profile = item.value["profile"] if item else "（暂无档案）"
 
-            # 用 LLM 提取/合并长期记忆
+            # 用 LLM 提取/合并长期记忆（AI 回答已由 add_messages 合并为完整消息）
+            ai_reply = state["messages"][-1].content
             response = model.invoke(
                 [HumanMessage(content=MEMORY_EXTRACT_PROMPT.format(
                     old_profile=old_profile,
                     input_str=state["input_str"],
-                    llm_output=state["llm_output"],
+                    llm_output=ai_reply,
                 ))]
             )
             new_profile = response.content.strip()
@@ -449,6 +453,44 @@ class ChatService:
         """异步版 invoke：同步调用丢进线程池，不阻塞事件循环。"""
         return await asyncio.to_thread(self.invoke, user_id, thread_id, input_str)
 
+    def stream(self, user_id, thread_id, input_str):
+
+        def make_serializable(obj):
+            # 处理 LangChain 消息对象
+            if isinstance(obj, BaseMessage):
+                return {
+                    "type": obj.type,
+                    "content": obj.content,
+                }
+            # 递归处理字典
+            if isinstance(obj, dict):
+                return {k: make_serializable(v) for k, v in obj.items()}
+            # 递归处理列表/元组
+            if isinstance(obj, (list, tuple)):
+                return [make_serializable(v) for v in obj]
+            # 其他类型直接返回
+            return obj
+
+        config = {
+            "configurable": {"thread_id": thread_id, "user_id": user_id},
+            "metadata": {"user_id": user_id},  # 随 checkpoint 写入 metadata
+        }  # 会话隔离
+
+        # stream_mode="messages" 会捕获图中所有 LLM 调用的 token 事件，
+        # 包括 classify_node 的 yes/no 与 memory_node 的记忆提取输出，
+        # 必须按 meta["langgraph_node"] 过滤，只输出 llm_node 的增量，
+        # 否则分类器的 "no" 会混入流式回答出现在前端。
+        for chunk, meta in self.graph.stream(
+                {"input_str": input_str},
+                config=config,
+                stream_mode="messages",
+        ):
+            if meta.get("langgraph_node") != "llm_node":
+                continue
+            if isinstance(chunk, AIMessageChunk) and chunk.content:
+                yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        yield f"data: [DONE]\n\n"
+
     def get_history_session(self, thread_id: str):
         config = {
             "configurable": {
@@ -459,7 +501,6 @@ class ChatService:
         if not snapshot or len(snapshot) == 0:
             logger.error(f"会话:{thread_id}记录不存在")
             return {"code": 404, "message": f"会话:{thread_id}记录不存在"}
-
         state_data = snapshot.values
         history_messages = state_data.get("messages", [])
         if not history_messages:
@@ -526,7 +567,6 @@ class ChatService:
             })
         sessions.sort(key=lambda s: s["last_updated"], reverse=True)
         return sessions
-
 
     def check_db_health(self):
         import psycopg

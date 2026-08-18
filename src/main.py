@@ -1,12 +1,10 @@
 from contextlib import asynccontextmanager
 
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.store.postgres import PostgresStore
 from loguru import logger
 from graph import  ChatService
 from fastapi import FastAPI
 from schemas import ChatRequest
-
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -32,9 +30,10 @@ app = FastAPI(title="智能AI客服", lifespan=lifespan)
 async def chat(request_body: ChatRequest):
     query = request_body.query
     thread_id = request_body.thread_id
-    answer = await chat_service.a_invoke("user_001", thread_id, query)
-    return {"thread_id": thread_id, "answer": answer}
-
+    # answer = await chat_service.a_invoke("user_001", thread_id, query)
+    # return {"thread_id": thread_id, "answer": answer}
+    event_stream = chat_service.stream("user_001", thread_id, query)
+    return StreamingResponse(event_stream, media_type="text/event-stream")
 
 @app.get("/api/chat/{thread_id}/history")
 def get_history_session(thread_id: str):

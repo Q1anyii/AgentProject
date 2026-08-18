@@ -869,14 +869,50 @@
 
         const API_BASE = ''; // 使用相对路径，假设前后端同域部署
 
-        async function apiChat(query, threadId) {
+        async function apiChat(query, threadId, onAnswer) {
             const response = await fetch(`${API_BASE}/api/chat/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query, thread_id: threadId })
             });
             if (!response.ok) throw new Error(`请求失败: ${response.status}`);
-            return response.json();
+
+            // 降级：响应非 SSE（错误页/旧后端）时按普通 JSON 处理
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
+                const data = await response.json();
+                return data.answer || '';
+            }
+
+            // 手写 SSE 解析：按空行切分事件，去 data: 前缀后 JSON.parse
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let answer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                const events = buffer.split('\n\n');
+                buffer = events.pop(); // 末尾可能是不完整片段，留到下一轮
+
+                for (const event of events) {
+                    const line = event.trim();
+                    if (!line.startsWith('data:')) continue;
+                    const payload = line.slice(5).trim();
+                    if (!payload || payload === '[DONE]') continue;
+
+                    const chunk = JSON.parse(payload);
+                    // messages 模式下 content 是回答的增量分片，逐片累加实现打字机效果
+                    if (typeof chunk.content === 'string' && chunk.content) {
+                        answer += chunk.content;
+                        if (onAnswer) onAnswer(answer);
+                    }
+                }
+            }
+            return answer;
         }
 
         async function apiGetHistory(threadId) {
@@ -1001,6 +1037,19 @@
                 </div>
             `;
             return div;
+        }
+
+        /**
+         * 局部更新最后一条 assistant 消息的文本（打字机效果专用）
+         * 返回 false 表示目标 DOM 不存在（首个分片到达前气泡未渲染），由调用方触发全量渲染
+         */
+        function updateStreamingContent(text) {
+            const contents = messagesWrapper.querySelectorAll('.message.assistant .message-content');
+            const last = contents[contents.length - 1];
+            if (!last) return false;
+            last.textContent = text; // textContent 自动转义，防 XSS
+            scrollToBottom();
+            return true;
         }
 
         /**
@@ -1210,18 +1259,31 @@
             addThinkingIndicator();
 
             try {
-                const result = await apiChat(content, state.currentThreadId);
-                removeThinkingIndicator();
-
+                // 先插入空的 assistant 消息，收到首个分片后流式填充
                 const aiMsg = {
                     role: 'assistant',
-                    content: result.answer,
+                    content: '',
                     time: formatTime()
                 };
                 state.messages.push(aiMsg);
                 if (session) session.messages = [...state.messages];
 
-                renderMessages();
+                const answer = await apiChat(content, state.currentThreadId, (text) => {
+                    removeThinkingIndicator();
+                    aiMsg.content = text;
+                    // 流式期间若切换了会话，停止更新 DOM，防止污染其他会话
+                    if (state.messages[state.messages.length - 1] !== aiMsg) return;
+                    // 首帧渲染气泡，后续分片只更新文本节点，避免每 token 全量重建 DOM
+                    if (!updateStreamingContent(text)) renderMessages();
+                });
+
+                removeThinkingIndicator();
+                // 流式期间切换过会话则跳过收尾渲染（本轮消息已不属于当前视图）
+                if (state.messages[state.messages.length - 1] === aiMsg) {
+                    aiMsg.content = answer || '（无回复）';
+                    if (session) session.messages = [...state.messages];
+                    renderMessages();
+                }
             } catch (err) {
                 removeThinkingIndicator();
                 showError('发送消息失败: ' + err.message);
