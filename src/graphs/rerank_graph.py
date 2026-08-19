@@ -1,15 +1,17 @@
-from typing import  TypedDict, List, Dict, Any
+from typing import TYPE_CHECKING, TypedDict, List, Dict, Any
 from langchain_core.documents import Document
 from langgraph.constants import START, END
 from langgraph.graph.state import StateGraph
 from loguru import logger
 from pydantic import Field, BaseModel
 
-from chat_service import ChatService
+if TYPE_CHECKING:
+    # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
+    from chat_service import ChatService
 from init import model, online_rerank
 
 
-def build_rerank_graph(self: ChatService):  # ← 原 query_rerank_graph 逻辑整体搬入
+def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
     collection = self.collection  # ← 关键：闭包捕获 self.collection，retrieve 节点内继续用 collection 变量
 
     logger.info("正在进行Query 改写 + 重排序")

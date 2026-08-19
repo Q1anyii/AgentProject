@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, TYPE_CHECKING
 
 from langgraph.types import CachePolicy, Send
 from langgraph.store.base import BaseStore
@@ -11,12 +11,14 @@ from langgraph.graph.state import StateGraph
 from loguru import logger
 from pydantic import Field
 
-from chat_service import ChatService
+if TYPE_CHECKING:
+    # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
+    from chat_service import ChatService
 from graphs.rerank_graph import build_rerank_graph
 from init import model, system_prompt
 
 
-def build_main_graph(self: ChatService):  # ← 原 build_chat_graph 逻辑整体搬入
+def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
 
     rerank_graph = build_rerank_graph(self=self)
 

@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from loguru import logger
-from chat_service import  ChatService
+from chat_service import ChatService
 from fastapi import FastAPI
 from schemas import ChatRequest
 from fastapi.responses import StreamingResponse
