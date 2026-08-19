@@ -70,25 +70,23 @@ def check_db_health():
     status = chat_service.check_db_health()
     return status
 
-# ===== 认证：静态测试账号 user / 1234（演示环境）=====
-# 静态账号：登录成功签发临时 token（演示用），注册/找回为占位提示
-STATIC_ACCOUNT = {"id": "user", "password": "1234", "name": "测试用户", "role": "学员"}
+# ===== 认证接口：MySQL 用户表校验 =====
 
 
 @app.post("/api/login")
 def login(request_body: LoginRequest):
-    if request_body :
-        user_id = request_body.userId
-        password = request_body.password
-        user_info = login_service.login(user_id, password)
-        return {"ok": True, "token": uuid4().hex, "user_info": user_info}
-    return JSONResponse({"ok": False, "message": "用户 ID 或密码错误"}, status_code=401)
+    user_id = request_body.userId
+    password = request_body.password
+    user_info = login_service.login(user_id, password)
+    if not user_info:
+        return JSONResponse({"ok": False, "message": "用户 ID 或密码错误"}, status_code=401)
+    return {"ok": True, "token": uuid4().hex, "user_info": user_info}
 
 
 @app.post("/api/register")
 def register(request_body: RegisterRequest):
     return JSONResponse(
-        {"ok": False, "message": "演示环境暂不支持注册，请使用测试账号 user / 1234"},
+        {"ok": False, "message": "注册功能开发中，请联系管理员"},
         status_code=400,
     )
 
@@ -96,7 +94,7 @@ def register(request_body: RegisterRequest):
 @app.post("/api/recover")
 def recover(request_body: RecoverRequest):
     return JSONResponse(
-        {"ok": False, "message": "演示环境暂不支持找回密码，请联系管理员"},
+        {"ok": False, "message": "找回密码功能开发中，请联系管理员"},
         status_code=400,
     )
 
