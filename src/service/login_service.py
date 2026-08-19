@@ -1,13 +1,14 @@
+import datetime
 import os
+import random
 from pathlib import Path
 from typing import Optional
-
+from utils.rand_id_util import Random
 from dbutils.pooled_db import PooledDB
 import pymysql
 from loguru import logger
+from datetime import datetime
 
-from schemas.request_schemas.login_schema import LoginRequest
-from schemas.response_schemas.login_schema import LoginResponse
 from utils.jwt_utils import verify_password, get_password_hash
 
 
@@ -129,6 +130,28 @@ class LoginService:
         finally:
             conn.close()
 
+    def register(self, *args):
+        conn = self.get_connection()
+        create_time = datetime.now()
+        update_time = datetime.now()
+        username, user_id, password = args
+        placeholders = ", ".join(["%s"] * (len(args)+3))
+        try:
+            cur = conn.cursor()
+            sql = "SELECT * FROM userInfo WHERE user_id=%s"
+            if cur.execute(sql, user_id):
+                return "该用户已存在"
+            password = get_password_hash(password)
+            sql = f"INSERT into userinfo(id, user_id, password, username, create_time, update_time) VALUES ({placeholders})"
+            success = cur.execute(sql, (Random.gen_simple_inc_random(), user_id, password, username, create_time, update_time))
+            return success
+        except pymysql.MySQLError as e:
+            logger.error(f"数据库执行异常 {e}")
+            raise
+        finally:
+            conn.close()
+
+
 
 # ---------------- 业务示例 登录查询用户 ----------------
 if __name__ == "__main__":
@@ -139,8 +162,9 @@ if __name__ == "__main__":
     with LoginService() as service:
         conn = service.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM userInfo WHERE user_id=%s", ("user_01",))
+        execute = cursor.execute("SELECT * FROM userInfo WHERE user_id=%s", ("user",))
         user = cursor.fetchone()
         print(user)
+        print(execute)
         cursor.close()
         conn.close()

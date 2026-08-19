@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from dotenv import load_dotenv
 
 from service.login_service import LoginService
+from temp.response_temp import Response
 from utils.jwt_utils import get_current_user, create_access_token, TokenData
 
 load_dotenv()
@@ -89,7 +90,7 @@ def delete_session_by_id(thread_id: str, current_user: TokenData = Depends(get_c
     if owner and owner != str(current_user.user_id) and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="无权删除该会话")
     success = chat_service.delete_session_by_id(thread_id)
-    return success
+    return Response.success(success)
 
 @app.get("/api/users/{user_id}/sessions")
 def get_sessions_by_user_id(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
@@ -113,7 +114,7 @@ def login(request_body: LoginRequest):
     user_info = login_service.login(user_id, password)
     # login 返回 dict 才是成功：密码错误/用户不存在时返回的是字符串提示
     if not isinstance(user_info, dict):
-        return JSONResponse({"ok": False, "message": user_info or "用户 ID 或密码错误"}, status_code=401)
+        return Response.failed(user_info or "用户 ID 或密码错误")
     token = create_access_token(
         data={
             "sub": str(user_info["user_id"]),
@@ -126,10 +127,15 @@ def login(request_body: LoginRequest):
 
 @app.post("/api/register")
 def register(request_body: RegisterRequest):
-    return JSONResponse(
-        {"ok": False, "message": "注册功能开发中，请联系管理员"},
-        status_code=400,
-    )
+
+    success = login_service.register(*request_body)
+    if not success:
+        return Response.failed("注册失败")
+    elif success == 1:
+        return Response.success()
+    else:
+        return Response.failed(success)
+
 
 
 @app.post("/api/recover")

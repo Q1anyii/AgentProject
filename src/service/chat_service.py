@@ -222,9 +222,8 @@ class ChatService:
             return f"会话:{thread_id}记录不存在"
         checkpointer.delete_thread(thread_id)
         logger.info(f"删除会话:{thread_id}成功")
-        return {
-            "title": f"删除会话:{thread_id}成功",
-        }
+        return f"删除会话:{thread_id}成功"
+
 
     def get_user_sessions(self, user_id: str):
         checkpointer = self.checkpointer
