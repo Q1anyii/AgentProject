@@ -34,7 +34,7 @@
 
 7. **`make_serializable` 死代码**：[chat_service.py:106](file:///E:/工作文件/AgentProject/src/chat_service.py) 定义了但从未调用，应删除。
 
-8. **`retrieve_node` 缓存策略粒度**：`CachePolicy(ttl=10)` 缓存整个节点输出，若同 thread 内连续追问，改写结果命中但检索重跑——可接受，但注意 10s 过期后相同问题会重复消耗 API。
+8. **`retrieve_node` 缓存策略粒度**：`CachePolicy(ttl=10)` 缓存整个节点输出，若同 thread 内连续追问，改写结果命中但检索重跑——可接受，但注意 10s 过期后相同问题会重复消耗 API。-->thread_id+语义存储作为key存储入redis
 
 9. **重排线程无上限**：`ThreadPoolExecutor(max_workers=len(queries))`，若改写出 5+ 子查询会开 5+ 线程，建议 `min(len(queries), 4)` 封顶。
 

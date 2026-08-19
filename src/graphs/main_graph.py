@@ -46,7 +46,7 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
 
         retrieve_res = rerank_graph.invoke({
             "question": input_str,
-            "history": history
+            "history": history,
         }
         )
 
