@@ -191,17 +191,16 @@ class ChatService:
 
     def get_thread_user_id(self, thread_id: str):
         """查询会话归属用户（用于 history/delete 接口的归属校验）"""
-        from langgraph.checkpoint.base import CheckpointTuple
-
         for item in self.checkpointer.list(None):
             if item.config["configurable"]["thread_id"] != thread_id:
                 continue
-            checkpoint_data = item.checkpoint
-            owner = (
-                    checkpoint_data.get("metadata", {}).get("user_id") or
-                    item.config["configurable"].get("user_id") or
-                    item.metadata.get("user_id")  # CheckpointTuple 可能有 metadata
-            )
+            # LangGraph 1.x：config 的 metadata 落在 CheckpointTuple.metadata（checkpoints 表 metadata 列），
+            # checkpoint JSON 内部没有 metadata 字段；configurable 只持久化 thread_id，也不含 user_id
+            owner = None
+            if isinstance(item.metadata, dict):
+                owner = item.metadata.get("user_id")
+            if not owner and isinstance(item.checkpoint, dict):
+                owner = item.checkpoint.get("metadata", {}).get("user_id")  # 兼容旧版本存储
             if owner:
                 return str(owner)
         return None
@@ -216,18 +215,19 @@ class ChatService:
 
     def delete_session_by_id(self, thread_id: str):
         checkpointer = self.checkpointer
-        history_msg = self.get_history_session(thread_id)
         flag = False
-        if not history_msg:
-            logger.error(f"会话:{thread_id}记录不存在")
-            return flag, f"会话:{thread_id}记录不存在:none"
         try:
             checkpointer.delete_thread(thread_id)
-            logger.info(f"删除会话:{thread_id}成功:success")
+            logger.info(f"删除会话:{thread_id}成功")
             flag = True
             return flag, f"删除会话:{thread_id}成功"
-        except TypeError:
-            return flag, f"删除会话失败:failed"
+        except KeyError:
+            # LangGraph checkpointer: thread不存在抛出 KeyError
+            logger.warning(f"删除会话:{thread_id}，会话记录不存在")
+            return flag, f"会话:{thread_id}记录不存在"
+        except Exception as e:
+            logger.error(f"删除会话{thread_id}异常，err={repr(e)}", exc_info=True)
+            return flag, f"删除会话失败：{str(e)}"
 
 
     def get_user_sessions(self, user_id: str):
@@ -239,13 +239,13 @@ class ChatService:
 
         for item in checkpointer.list(None):
             tid = item.config["configurable"]["thread_id"]
-            checkpoint_data = item.checkpoint
-            checkpoint_user_id = (
-                    checkpoint_data.get("metadata", {}).get("user_id") or
-                    item.config["configurable"].get("user_id") or
-                    item.metadata.get("user_id")  # CheckpointTuple 可能有 metadata
-            )
-            if checkpoint_user_id != user_id:
+            # LangGraph 1.x：归属信息在 CheckpointTuple.metadata，checkpoint JSON 内无 metadata 字段
+            owner = None
+            if isinstance(item.metadata, dict):
+                owner = item.metadata.get("user_id")
+            if not owner and isinstance(item.checkpoint, dict):
+                owner = item.checkpoint.get("metadata", {}).get("user_id")  # 兼容旧版本存储
+            if owner != user_id:
                 continue
             if tid not in latest_by_thread:
                 latest_by_thread[tid] = item

@@ -31,4 +31,10 @@ SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 # 硅基流动平台 API 密钥
 SILICONFLOW_API_KEY=sk-**************************
 
-POSTGRESQL_DB_URL="postgresql://your_username:password@localhost:5432/your_db?sslmode=disable"
+POSTGRESQL_DB_URL="postgresql://your_username:password@ip_address:5432/your_db?sslmode=disable"
+
+MYSQL_DB_URL=mysql+pymysql://root:1234@127.0.0.1:3306/mitta
+
+JWT_SECRET_KEY=**************************
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=14400

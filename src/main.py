@@ -52,6 +52,11 @@ def require_self_or_admin(user_id: str, current_user: TokenData = Depends(get_cu
 def chat(request_body: ChatRequest, current_user: TokenData = Depends(get_current_user)):
     query = request_body.query
     thread_id = request_body.thread_id
+    # 会话归属校验（与 history/delete 一致）：会话已存在但非本人所有时拒绝，
+    # 否则任意用户可用他人 thread_id 发消息，LangGraph 会用当前用户覆盖该会话归属 metadata 造成劫持
+    owner = chat_service.get_thread_user_id(thread_id)
+    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权使用该会话")
     # 认证在路由层完成：JWT 解析出 user_id 后查库，构造请求级用户上下文（供图内工具读取）
     user_row = login_service.get_user_by_id(str(current_user.user_id))
     user_info = (

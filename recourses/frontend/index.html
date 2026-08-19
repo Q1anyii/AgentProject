@@ -500,14 +500,22 @@
         }
 
         .sidebar-brand-mark {
-            width: 34px;
-            height: 34px;
+            width: 40px;
+            height: 40px;
             border-radius: var(--radius-md);
+            overflow: hidden;  /* 与登录页 auth-logo-mark 保持一致：圆角裁剪内部图片 */
             background-color: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
+        }
+
+        .sidebar-brand-mark img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
         }
 
         .new-chat-btn {
@@ -1319,6 +1327,13 @@
             cache.set(STORAGE_KEY.LAST_ACTIVE, Date.now(), CACHE_TTL_DAYS);
         }
 
+        // 会话缓存 key 按用户隔离：不同账号各看各的会话列表/当前线程，
+        // 否则切换账号后侧边栏会残留上一个账号的会话（点击后触发 403，造成"会话共享"假象）
+        function sessionCacheKey(key) {
+            const u = cache.get(STORAGE_KEY.USER, null);
+            return u && u.userId ? `${key}_${u.userId}` : key;
+        }
+
         // ============================================================
         // API 调用
         // ============================================================
@@ -1349,6 +1364,13 @@
                 body: JSON.stringify({ query, thread_id: threadId })
             });
             handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权使用该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
             if (!response.ok) throw new Error(`请求失败: ${response.status}`);
 
             const contentType = response.headers.get('content-type') || '';
@@ -1394,6 +1416,13 @@
                 headers: authHeaders()
             });
             handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权访问该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
             if (!response.ok) throw new Error(`获取历史失败: ${response.status}`);
             return response.json();
         }
@@ -1404,6 +1433,13 @@
                 headers: authHeaders()
             });
             handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权删除该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
             if (!response.ok) throw new Error(`删除失败: ${response.status}`);
             return response.json();
         }
@@ -1721,7 +1757,7 @@
                     <aside class="sidebar" :class="{ open: sidebarOpen }" role="navigation" aria-label="会话列表">
                         <div class="sidebar-header">
                             <div class="sidebar-brand">
-                                <div class="sidebar-brand-mark"><img src="favicon.png" alt=""></div>
+                                <div class="sidebar-brand-mark"><img src="/favicon.png" alt=""></div>
                                 <span>Mitta AI</span>
                             </div>
                             <button class="new-chat-btn" @click="createNewSession" title="新建会话" aria-label="新建会话">
@@ -1874,8 +1910,8 @@
             setup() {
                 const router = useRouter();
                 const user = ref(cache.get(STORAGE_KEY.USER, null));
-                const sessions = ref(cache.get(STORAGE_KEY.SESSIONS, []));
-                const currentThreadId = ref(cache.get(STORAGE_KEY.CURRENT_THREAD, null));
+                const sessions = ref(cache.get(sessionCacheKey(STORAGE_KEY.SESSIONS), []));
+                const currentThreadId = ref(cache.get(sessionCacheKey(STORAGE_KEY.CURRENT_THREAD), null));
                 const messages = ref([]);
                 const inputText = ref('');
                 const isLoading = ref(false);
@@ -1921,17 +1957,32 @@
                         messages.value = [];
                         return;
                     }
-                    const cached = cache.getMessages(currentThreadId.value);
-                    if (cached && cached.length > 0) {
-                        messages.value = cached;
-                    } else {
-                        try {
-                            const history = await apiGetHistory(currentThreadId.value);
-                            messages.value = parseHistory(history);
-                        } catch (err) {
-                            messages.value = [];
-                        }
+                    try {
+                        // 优先请求后端历史：同时完成归属校验（403 抛错），
+                        // 不能先读本地缓存——他人会话的缓存消息会直接展示，造成"会话共享"假象
+                        const history = await apiGetHistory(currentThreadId.value);
+                        messages.value = parseHistory(history);
                         cache.setMessages(currentThreadId.value, messages.value);
+                    } catch (err) {
+                        if (err && err.status === 403) {
+                            // 会话属于其他账号：从列表移除并提示，避免残留
+                            const removed = currentThreadId.value;
+                            sessions.value = sessions.value.filter(s => s.id !== removed);
+                            cache.removeMessages(removed);
+                            saveSessions();
+                            if (sessions.value.length > 0) {
+                                currentThreadId.value = sessions.value[0].id;
+                                saveCurrentThread();
+                                await loadCurrentMessages();
+                            } else {
+                                createNewSession();
+                            }
+                            showToast('该会话不属于当前账号，已移除', 'error');
+                            return;
+                        }
+                        // 网络/服务异常：回退本地缓存兜底，保证弱网下仍可阅读
+                        const cached = cache.getMessages(currentThreadId.value);
+                        messages.value = cached && cached.length > 0 ? cached : [];
                     }
                 };
 
@@ -1946,11 +1997,11 @@
                 };
 
                 const saveSessions = () => {
-                    cache.set(STORAGE_KEY.SESSIONS, sessions.value);
+                    cache.set(sessionCacheKey(STORAGE_KEY.SESSIONS), sessions.value);
                 };
 
                 const saveCurrentThread = () => {
-                    cache.set(STORAGE_KEY.CURRENT_THREAD, currentThreadId.value);
+                    cache.set(sessionCacheKey(STORAGE_KEY.CURRENT_THREAD), currentThreadId.value);
                 };
 
                 const saveMessages = () => {
@@ -2107,6 +2158,16 @@
                     } catch (err) {
                         messages.value.pop();
                         saveMessages();
+                        if (err && err.status === 403) {
+                            // 会话被判定为他人所有：从列表移除并新建会话，不再复用该 thread
+                            const removed = currentThreadId.value;
+                            sessions.value = sessions.value.filter(s => s.id !== removed);
+                            cache.removeMessages(removed);
+                            saveSessions();
+                            createNewSession();
+                            showToast('该会话不属于当前账号，已切换新会话', 'error');
+                            return;
+                        }
                         showToast('发送消息失败: ' + err.message, 'error');
                     } finally {
                         isLoading.value = false;
@@ -2137,6 +2198,8 @@
                 const closeSidebar = () => { sidebarOpen.value = false; };
 
                 const logout = () => {
+                    // 会话缓存按 userId 隔离（sessionCacheKey），登出无需清理：
+                    // 同一账号重新登录后仍能恢复自己的会话列表，不同账号之间天然隔离
                     cache.remove(STORAGE_KEY.USER);
                     router.push('/api/login');
                 };
