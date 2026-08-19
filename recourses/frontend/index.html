@@ -1390,6 +1390,22 @@
             }
         }
 
+        // 统一解析后端 JSON 响应：兼容 401/400 错误体与 422 校验错误的 detail 数组
+        async function parseApiResponse(res) {
+            let data = {};
+            try {
+                data = await res.json();
+            } catch {
+                // 非 JSON 响应（如 500 空页），走下方统一错误文案
+            }
+            if (data.ok) return { ok: true, data };
+            let message = data.message;
+            if (!message && Array.isArray(data.detail)) {
+                message = data.detail.map(d => d.msg || '').filter(Boolean).join('；');
+            }
+            return { ok: false, message: message || `请求失败(${res.status})` };
+        }
+
         // ============================================================
         // 认证相关组件
         // ============================================================
@@ -1447,19 +1463,27 @@
                     if (!this.validate()) return;
                     this.isSubmitting = true;
                     try {
-                        // 后端认证：MySQL 用户表校验，成功后返回用户信息
+                        // 后端认证：MySQL 用户表校验，成功返回 { ok, token, user_info }
                         const res = await fetch(`${API_BASE}/api/login`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ userId: this.form.userId.trim(), password: this.form.password })
                         });
-                        const data = await res.json();
-                        if (data.ok) {
-                            cache.set(STORAGE_KEY.USER, data.user);
+                        const { ok, data, message } = await parseApiResponse(res);
+                        // 后端契约：ok=true 且 user_info 非空才算登录成功（用户不存在时返回 401）
+                        if (ok && data.user_info) {
+                            // 只存展示所需字段并剔除密码等敏感信息，避免整行落 localStorage
+                            const u = data.user_info;
+                            cache.set(STORAGE_KEY.USER, {
+                                userId: u.userId ?? u.user_id,
+                                name: u.name ?? u.username ?? u.userName,
+                                role: u.role || '学员',
+                                token: data.token
+                            });
                             updateLastActive();
                             this.$router.push('/chat');
                         } else {
-                            this.errors.password = data.message || '用户 ID 或密码错误';
+                            this.errors.password = message || '用户 ID 或密码错误';
                         }
                     } catch (err) {
                         this.errors.password = '网络异常，请稍后重试';
@@ -1542,20 +1566,21 @@
                 async handleRegister() {
                     if (!this.validate()) return;
                     this.isSubmitting = true;
-                    // 本地保存 AI 称呼：演示环境注册为占位接口，先落本地，注册成功后登录即生效
+                    // 本地保存 AI 称呼，注册成功后登录即生效
                     cache.set(STORAGE_KEY.AI_CALL_NAME, this.form.name.trim());
                     try {
+                        // 字段与后端 RegisterRequest 契约一致：userName / userId / password
                         const res = await fetch(`${API_BASE}/api/register`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
+                                userName: this.form.name.trim(),
                                 userId: this.form.userId.trim(),
-                                password: this.form.password,
-                                name: this.form.name.trim()
+                                password: this.form.password
                             })
                         });
-                        const data = await res.json();
-                        this.formMsg = data.message || (data.ok ? '注册成功' : '注册失败');
+                        const { ok, message } = await parseApiResponse(res);
+                        this.formMsg = message || (ok ? '注册成功' : '注册失败');
                     } catch (err) {
                         this.formMsg = '网络异常，请稍后重试';
                     } finally {
@@ -1620,13 +1645,14 @@
                     if (!this.validate()) return;
                     this.isSubmitting = true;
                     try {
+                        // 字段与后端 RecoverRequest 契约一致：userId / newPassword
                         const res = await fetch(`${API_BASE}/api/recover`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ userId: this.form.userId.trim(), newPassword: this.form.newPassword })
                         });
-                        const data = await res.json();
-                        this.formMsg = data.message || (data.ok ? '密码已重置' : '重置失败');
+                        const { ok, message } = await parseApiResponse(res);
+                        this.formMsg = message || (ok ? '密码已重置' : '重置失败');
                     } catch (err) {
                         this.formMsg = '网络异常，请稍后重试';
                     } finally {

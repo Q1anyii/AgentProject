@@ -98,7 +98,8 @@ class LoginService:
                 (user_id, password)
             )
             user_info = cur.fetchone()
-            return user_info
+            if user_info:
+                return user_info
         except pymysql.OperationalError as e:
             logger.error(f"数据库连接异常 {e}")
             raise
