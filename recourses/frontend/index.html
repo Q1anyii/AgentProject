@@ -1226,7 +1226,8 @@
             USER: 'mitta_auth_user',
             SESSIONS: 'mitta_sessions',
             CURRENT_THREAD: 'mitta_current_thread',
-            LAST_ACTIVE: 'mitta_last_active'
+            LAST_ACTIVE: 'mitta_last_active',
+            AI_CALL_NAME: 'mitta_ai_call_name' // 注册时设置的用户名，AI 以此称呼用户
         };
         const CACHE_TTL_DAYS = 7;
 
@@ -1472,6 +1473,11 @@
                         <p class="auth-subtitle">注册后即可体验智能客服服务</p>
                         <form @submit.prevent="handleRegister">
                             <div class="form-group">
+                                <label class="form-label">用户名</label>
+                                <input v-model="form.name" type="text" class="form-input" placeholder="设置用户名，AI 将这样称呼您" maxlength="20">
+                                <div class="form-error">{{ errors.name }}</div>
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label">用户 ID</label>
                                 <input v-model="form.userId" type="text" class="form-input" placeholder="设置用户 ID">
                                 <div class="form-error">{{ errors.userId }}</div>
@@ -1500,8 +1506,8 @@
             `,
             data() {
                 return {
-                    form: { userId: '', password: '', confirmPassword: '' },
-                    errors: { userId: '', password: '', confirmPassword: '' },
+                    form: { userId: '', password: '', confirmPassword: '', name: '' },
+                    errors: { userId: '', password: '', confirmPassword: '', name: '' },
                     formMsg: '',
                     isSubmitting: false
                 };
@@ -1509,7 +1515,7 @@
             methods: {
                 validate() {
                     let valid = true;
-                    this.errors = { userId: '', password: '', confirmPassword: '' };
+                    this.errors = { userId: '', password: '', confirmPassword: '', name: '' };
                     if (!this.form.userId.trim()) {
                         this.errors.userId = '请输入用户 ID';
                         valid = false;
@@ -1522,16 +1528,26 @@
                         this.errors.confirmPassword = '两次输入密码不一致';
                         valid = false;
                     }
+                    if (!this.form.name.trim()) {
+                        this.errors.name = '请输入用户名（AI 称呼）';
+                        valid = false;
+                    }
                     return valid;
                 },
                 async handleRegister() {
                     if (!this.validate()) return;
                     this.isSubmitting = true;
+                    // 本地保存 AI 称呼：演示环境注册为占位接口，先落本地，注册成功后登录即生效
+                    cache.set(STORAGE_KEY.AI_CALL_NAME, this.form.name.trim());
                     try {
                         const res = await fetch(`${API_BASE}/api/register`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ userId: this.form.userId.trim(), password: this.form.password })
+                            body: JSON.stringify({
+                                userId: this.form.userId.trim(),
+                                password: this.form.password,
+                                name: this.form.name.trim()
+                            })
                         });
                         const data = await res.json();
                         this.formMsg = data.message || (data.ok ? '注册成功' : '注册失败');
@@ -1737,7 +1753,7 @@
                                         </svg>
                                         智能客服已就绪
                                     </div>
-                                    <h1>有什么可以帮您的？</h1>
+                                    <h1>您好，{{ greetingName }}！有什么可以帮您的？</h1>
                                     <p>开始一段新的对话，或从左侧选择一个历史会话继续交流。</p>
                                     <div class="quick-actions">
                                         <button v-for="q in quickQuestions" :key="q" class="quick-action" @click="sendQuick(q)">{{ q }}</button>
@@ -1824,6 +1840,11 @@
 
                 const userAvatar = computed(() => {
                     return user.value?.name?.charAt(0).toUpperCase() || 'U';
+                });
+
+                // AI 对用户的称呼：注册时设置的用户名优先，其次登录用户昵称
+                const greetingName = computed(() => {
+                    return cache.get(STORAGE_KEY.AI_CALL_NAME) || user.value?.name || '同学';
                 });
 
                 const canSend = computed(() => {
@@ -2097,7 +2118,7 @@
                     user, sessions, currentThreadId, messages, inputText,
                     isLoading, streaming, sidebarOpen, healthStatus, healthText,
                     messagesContainer, textarea, quickQuestions,
-                    currentSessionTitle, userAvatar, canSend,
+                    currentSessionTitle, userAvatar, greetingName, canSend,
                     createNewSession, switchSession, deleteSession,
                     clearCurrentChat, sendMessage, sendQuick,
                     handleKeydown, autoResize, openSidebar, closeSidebar,
