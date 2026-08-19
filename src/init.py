@@ -6,6 +6,7 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from langchain.chat_models.base import init_chat_model
 from FlagEmbedding import FlagReranker
 from langchain_community.document_loaders.text import TextLoader
+from langchain_core.runnables.config import RunnableConfig
 from langchain_openai import OpenAIEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
 from load_dotenv import load_dotenv
@@ -61,23 +62,27 @@ COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
 class CustomPostgresSaver(PostgresSaver):
     def list(
         self,
+        config: RunnableConfig | None = None,
         *,
-        thread_id: str | None = None,
-        user_id: str | None = None,   # 扩展参数
+        thread_id: str | None = None,   # 扩展：便捷定位单线程（等价于 config 传 thread_id）
+        user_id: str | None = None,     # 扩展：按 metadata 内 user_id 过滤会话
         filter: dict | None = None,
+        before: RunnableConfig | None = None,
         limit: int | None = None,
-        offset: int | None = None,
     ):
-        """支持按 user_id(metadata内)过滤会话"""
+        """兼容父类签名，并扩展支持 thread_id / user_id 便捷过滤。
+
+        必须保持与 PostgresSaver.list(config, *, filter, before, limit) 签名兼容：
+        LangGraph 内部及既有调用会按父类签名传参，签名不兼容会直接 TypeError。
+        """
         if filter is None:
             filter = {}
-        # 如果传入user_id，合并进filter
+        # 如果传入 user_id，合并进 filter（数据库层 metadata @> '{"user_id": ...}' 过滤）
         if user_id is not None:
             filter["user_id"] = user_id
-
-        return super().list(
-            thread_id=thread_id,
-            filter=filter,
-            limit=limit,
-            offset=offset
-        )
+        # 便捷参数：合并进 config，等价于 {"configurable": {"thread_id": thread_id}}
+        if thread_id is not None:
+            if config is None:
+                config = {}
+            config.setdefault("configurable", {})["thread_id"] = thread_id
+        return super().list(config, filter=filter, before=before, limit=limit)

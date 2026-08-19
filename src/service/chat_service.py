@@ -189,9 +189,9 @@ class ChatService:
 
     def get_thread_user_id(self, thread_id: str):
         """查询会话归属用户（用于 history/delete 接口的归属校验）"""
-        for item in self.checkpointer.list(None):
-            if item.config["configurable"]["thread_id"] != thread_id:
-                continue
+        # CustomPostgresSaver 扩展参数：SQL 层 WHERE thread_id = %s 精确定位该会话（最新在前），
+        # 不再全量遍历所有线程
+        for item in self.checkpointer.list(thread_id=thread_id):
             # LangGraph 1.x：config 的 metadata 落在 CheckpointTuple.metadata（checkpoints 表 metadata 列），
             # checkpoint JSON 内部没有 metadata 字段；configurable 只持久化 thread_id，也不含 user_id
             owner = None
@@ -235,9 +235,11 @@ class ChatService:
 
         latest_by_thread: dict[str, CheckpointTuple] = {}
 
-        for item in checkpointer.list(None):
+        # CustomPostgresSaver 扩展参数 user_id：数据库层执行 metadata @> '{"user_id": ...}' 过滤，
+        # 只返回该用户的 checkpoint，避免全表扫描后在 Python 层逐个跳过
+        for item in checkpointer.list(None, user_id=user_id):
             tid = item.config["configurable"]["thread_id"]
-            # LangGraph 1.x：归属信息在 CheckpointTuple.metadata，checkpoint JSON 内无 metadata 字段
+            # 兼容旧版本存储：checkpoint JSON 内可能没有 metadata 字段
             owner = None
             if isinstance(item.metadata, dict):
                 owner = item.metadata.get("user_id")
