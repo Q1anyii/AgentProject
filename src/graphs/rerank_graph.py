@@ -14,7 +14,6 @@ from init import model, online_rerank
 def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
     collection = self.collection  # ← 关键：闭包捕获 self.collection，retrieve 节点内继续用 collection 变量
 
-    logger.info("正在进行Query 改写 + 重排序")
 
     class RAGState(TypedDict):
         question: str
@@ -52,11 +51,12 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
             question=state["question"],
             history=history_text or "无",
         )
+        logger.info("正在进行Query 改写 + 重排序")
 
         result = model.with_structured_output(QueryRewriteResult).invoke(prompt)
 
         queries = [result.main_query] + result.sub_queries
-        logger.info(f"重新后问题:{queries}")
+        logger.info(f"重写后问题:{queries}")
         return {"rewritten_queries": queries}
 
     from concurrent.futures import ThreadPoolExecutor

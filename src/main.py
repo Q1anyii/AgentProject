@@ -1,18 +1,21 @@
+import os
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
-from uuid import uuid4
 
 from loguru import logger
 
+from context.user_context import CtxUser
 from schemas.request_schemas.chat_schema import ChatRequest
 from schemas.request_schemas.login_schema import *
 from service.chat_service import ChatService
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 
 from dotenv import load_dotenv
 
 from service.login_service import LoginService
+from utils.jwt_utils import get_current_user, create_access_token, TokenData
 
 load_dotenv()
 
@@ -36,32 +39,60 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
 
+
+# 资源归属校验：只允许本人访问自己的记忆/会话，管理员角色放行
+# FastAPI 会自动把路径参数 user_id 注入本依赖（必须定义在使用它的路由之前）
+def require_self_or_admin(user_id: str, current_user: TokenData = Depends(get_current_user)):
+    if str(current_user.user_id) != user_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该用户资源")
+    return current_user
+
 @app.post("/api/chat/")
-async def chat(request_body: ChatRequest):
+def chat(request_body: ChatRequest, current_user: TokenData = Depends(get_current_user)):
     query = request_body.query
     thread_id = request_body.thread_id
-    # answer = await chat_service.a_invoke("user_001", thread_id, query)
-    # return {"thread_id": thread_id, "answer": answer}
-    event_stream = chat_service.stream("user_001", thread_id, query)
+    # 认证在路由层完成：JWT 解析出 user_id 后查库，构造请求级用户上下文（供图内工具读取）
+    user_row = login_service.get_user_by_id(str(current_user.user_id))
+    user_info = (
+        CtxUser(
+            uid=user_row["id"],
+            user_id=user_row["user_id"],
+            password=None,  # 敏感字段不注入，工具无法访问
+            username=user_row["username"],
+            create_time=user_row["create_time"],
+            update_time=user_row["update_time"],
+        )
+        if user_row
+        else None
+    )
+    event_stream = chat_service.stream(current_user.user_id, thread_id, query, user_info=user_info)
     return StreamingResponse(event_stream, media_type="text/event-stream")
 
 @app.get("/api/chat/{thread_id}/history")
-def get_history_session(thread_id: str):
+def get_history_session(thread_id: str, current_user: TokenData = Depends(get_current_user)):
+    # 会话归属校验：会话存在但非本人所有时拒绝（管理员放行）
+    owner = chat_service.get_thread_user_id(thread_id)
+    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该会话")
     history_session = chat_service.get_history_session(thread_id)
     return history_session
 
 @app.get("/api/users/{user_id}/memory")
-def get_memory(user_id: str):
+def get_memory(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
     memory = chat_service.get_memory(user_id)
     return memory
 
 @app.delete("/api/chat/{thread_id}")
-def delete_session_by_id(thread_id: str):
+def delete_session_by_id(thread_id: str, current_user: TokenData = Depends(get_current_user)):
+    # 会话归属校验：会话存在但非本人所有时拒绝（管理员放行）
+    owner = chat_service.get_thread_user_id(thread_id)
+    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权删除该会话")
     success = chat_service.delete_session_by_id(thread_id)
     return success
 
 @app.get("/api/users/{user_id}/sessions")
-def get_sessions_by_user_id(user_id: str):
+def get_sessions_by_user_id(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
     sessions = chat_service.get_user_sessions(user_id)
     return sessions
 
@@ -72,15 +103,25 @@ def check_db_health():
 
 # ===== 认证接口：MySQL 用户表校验 =====
 
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
+
 
 @app.post("/api/login")
 def login(request_body: LoginRequest):
     user_id = request_body.userId
     password = request_body.password
     user_info = login_service.login(user_id, password)
-    if not user_info:
-        return JSONResponse({"ok": False, "message": "用户 ID 或密码错误"}, status_code=401)
-    return {"ok": True, "token": uuid4().hex, "user_info": user_info}
+    # login 返回 dict 才是成功：密码错误/用户不存在时返回的是字符串提示
+    if not isinstance(user_info, dict):
+        return JSONResponse({"ok": False, "message": user_info or "用户 ID 或密码错误"}, status_code=401)
+    token = create_access_token(
+        data={
+            "sub": str(user_info["user_id"]),
+            "role": user_info.get("role", "学员"),  # 管理员角色用于资源越权放行
+        },
+        expires_delta=timedelta(minutes=int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES)),
+    )
+    return {"ok": True, "token": token, "user_info": user_info}
 
 
 @app.post("/api/register")

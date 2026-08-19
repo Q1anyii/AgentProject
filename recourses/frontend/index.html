@@ -1322,12 +1322,33 @@
         // ============================================================
         // API 调用
         // ============================================================
+        // 构造带 JWT 的请求头（登录时 token 存于 STORAGE_KEY.USER.token）
+        function authHeaders(extra = {}) {
+            const user = cache.get(STORAGE_KEY.USER, null);
+            if (user && user.token) {
+                return { Authorization: `Bearer ${user.token}`, ...extra };
+            }
+            return extra;
+        }
+
+        // 统一处理 401：token 缺失/过期，清除登录态并回到登录页
+        function handleAuthError(response) {
+            if (response.status === 401) {
+                cache.remove(STORAGE_KEY.USER);
+                if (window.location.pathname !== '/api/login') {
+                    window.location.href = '/api/login';
+                }
+                throw new Error('登录已过期，请重新登录');
+            }
+        }
+
         async function apiChat(query, threadId, onStream) {
             const response = await fetch(`${API_BASE}/api/chat/`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ query, thread_id: threadId })
             });
+            handleAuthError(response);
             if (!response.ok) throw new Error(`请求失败: ${response.status}`);
 
             const contentType = response.headers.get('content-type') || '';
@@ -1369,13 +1390,20 @@
         }
 
         async function apiGetHistory(threadId) {
-            const response = await fetch(`${API_BASE}/api/chat/${threadId}/history`);
+            const response = await fetch(`${API_BASE}/api/chat/${threadId}/history`, {
+                headers: authHeaders()
+            });
+            handleAuthError(response);
             if (!response.ok) throw new Error(`获取历史失败: ${response.status}`);
             return response.json();
         }
 
         async function apiDeleteSession(threadId) {
-            const response = await fetch(`${API_BASE}/api/chat/${threadId}`, { method: 'DELETE' });
+            const response = await fetch(`${API_BASE}/api/chat/${threadId}`, {
+                method: 'DELETE',
+                headers: authHeaders()
+            });
+            handleAuthError(response);
             if (!response.ok) throw new Error(`删除失败: ${response.status}`);
             return response.json();
         }

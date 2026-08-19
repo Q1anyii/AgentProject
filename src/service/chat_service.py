@@ -37,6 +37,9 @@ ChatService（类，收拢全部资源与业务方法）
 └── 模块级工厂 get_chat_service()   # 或直接由 lifespan new + open/close
 """
 
+
+
+
 class ChatService:
 
 
@@ -72,6 +75,7 @@ class ChatService:
         )  # ← self.
         try:
             self.pool.check()
+            logger.success("PostgreSQL连接池初始化成功")
         except Exception as e:
             logger.error(f"PostgreSQL数据库连接失败：{e}")
             raise
@@ -86,6 +90,7 @@ class ChatService:
     def close(self, timeout:int =10):
         if self.pool:
             self.pool.close(timeout=timeout)
+            logger.info("PostgreSQL连接池已关闭")
 
 
     def invoke(self, user_id, thread_id, query) -> str:
@@ -101,7 +106,7 @@ class ChatService:
         """异步版 invoke：同步调用丢进线程池，不阻塞事件循环。"""
         return await asyncio.to_thread(self.invoke, user_id, thread_id, input_str)
 
-    def stream(self, user_id, thread_id, input_str):
+    def stream(self, user_id, thread_id, input_str, user_info=None):
 
         def make_serializable(obj):
             # 处理 LangChain 消息对象
@@ -120,33 +125,44 @@ class ChatService:
             return obj
 
         config = {
-            "configurable": {"thread_id": thread_id, "user_id": user_id},
+            "configurable": {
+                "thread_id": thread_id,
+                "user_id": user_id,
+                # 请求级用户上下文随 config 传入图（工具通过 RunnableConfig 参数读取），
+                # 不依赖 contextvars：StreamingResponse 每次 next() 都在新线程/新 context 执行，
+                # contextvars 的 set/reset 会跨 context 报错且 get() 拿不到值
+                "user_info": user_info,
+            },
             "metadata": {"user_id": user_id},  # 随 checkpoint 写入 metadata
         }  # 会话隔离
 
-        # stream_mode="messages" 会捕获图中所有 LLM 调用的 token 事件，
-        # 包括 classify_node 的 yes/no 与 memory_node 的记忆提取输出，
-        # 必须按 meta["langgraph_node"] 过滤，只输出 llm_node 的增量，
-        # 否则分类器的 "no" 会混入流式回答出现在前端。
-        for chunk, meta in self.main_graph.stream(
-                {"input_str": input_str},
-                config=config,
-                stream_mode="messages",
-        ):
-            if meta.get("langgraph_node") != "llm_node":
-                continue
-            if isinstance(chunk, AIMessageChunk) and chunk.content:
-                # content 可能是字符串或 list（多模态/工具消息），统一归一为纯文本，
-                # 否则前端 typeof === 'string' 检查失败会静默跳过，导致整轮流式不输出
-                content = chunk.content
-                if isinstance(content, list):
-                    content = "".join(
-                        part.get("text", "") if isinstance(part, dict) else str(part)
-                        for part in content
-                    )
-                if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
-        yield f"data: [DONE]\n\n"
+        try:
+            # stream_mode="messages" 会捕获图中所有 LLM 调用的 token 事件，
+            # 包括 classify_node 的 yes/no 与 memory_node 的记忆提取输出，
+            # 必须按 meta["langgraph_node"] 过滤，只输出 llm_node 的增量，
+            # 否则分类器的 "no" 会混入流式回答出现在前端。
+            for chunk, meta in self.main_graph.stream(
+                    {"input_str": input_str},
+                    config=config,
+                    stream_mode="messages",
+            ):
+                if meta.get("langgraph_node") != "llm_node":
+                    continue
+                if isinstance(chunk, AIMessageChunk) and chunk.content:
+                    # content 可能是字符串或 list（多模态/工具消息），统一归一为纯文本，
+                    # 否则前端 typeof === 'string' 检查失败会静默跳过，导致整轮流式不输出
+                    content = chunk.content
+                    if isinstance(content, list):
+                        content = "".join(
+                            part.get("text", "") if isinstance(part, dict) else str(part)
+                            for part in content
+                        )
+                    if content:
+                        yield f"data: {json.dumps({'content': content})}\n\n"
+            yield f"data: [DONE]\n\n"
+        except GeneratorExit:
+            # 客户端断开连接时 StreamingResponse 会关闭生成器，这里静默退出即可
+            raise
 
     def get_history_session(self, thread_id: str):
         config = {
@@ -172,6 +188,23 @@ class ChatService:
                 }
             )
         return history_session
+
+    def get_thread_user_id(self, thread_id: str):
+        """查询会话归属用户（用于 history/delete 接口的归属校验）"""
+        from langgraph.checkpoint.base import CheckpointTuple
+
+        for item in self.checkpointer.list(None):
+            if item.config["configurable"]["thread_id"] != thread_id:
+                continue
+            checkpoint_data = item.checkpoint
+            owner = (
+                    checkpoint_data.get("metadata", {}).get("user_id") or
+                    item.config["configurable"].get("user_id") or
+                    item.metadata.get("user_id")  # CheckpointTuple 可能有 metadata
+            )
+            if owner:
+                return str(owner)
+        return None
 
     def get_memory(self, user_id: str):
         store = self.store

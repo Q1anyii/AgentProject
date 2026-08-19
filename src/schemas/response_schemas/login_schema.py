@@ -4,7 +4,6 @@ from datetime import datetime
 class LoginResponse(BaseModel):
     id: int
     userId: str
-    password: str
     username: str
     createTime: datetime
     updateTime: datetime

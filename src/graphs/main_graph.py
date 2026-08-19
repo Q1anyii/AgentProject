@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.constants import START, END
 from langgraph.graph.message import MessagesState
 from langgraph.graph.state import StateGraph
+from langgraph.prebuilt import ToolNode
 from loguru import logger
 from pydantic import Field
 
@@ -15,12 +16,18 @@ if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
     from service.chat_service import ChatService
 from graphs.rerank_graph import build_rerank_graph
+from graphs.tool_graph import build_tool_graph
 from init import model, system_prompt
 
 
 def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
 
     rerank_graph = build_rerank_graph(self=self)
+
+    # 工具：LLM 需要时可调用（用户信息/会话总结），工具通过请求级上下文读取数据
+    tools = build_tool_graph()
+    tool_node = ToolNode(tools)
+    model_with_tools = model.bind_tools(tools)
 
     class OverAllState(MessagesState):
         input_str: Annotated[str, Field(description="用户输入")]
@@ -90,9 +97,13 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         # 注意：节点不能返回生成器——langgraph 1.x 会把生成器当单条消息交给
         # add_messages/_convert_to_message 转换，报 "Unsupported message type: generator"。
         chunks = []
-        for chunk in model.stream(messages):
+        for chunk in model_with_tools.stream(messages):
             chunks.append(chunk)
-        ai_reply = AIMessage(content="".join(c.content for c in chunks if isinstance(c.content, str)))
+        content = "".join(c.content for c in chunks if isinstance(c.content, str))
+        # 工具调用：模型可能返回 tool_calls（跨 chunk 累积，取最后一个完整结果），
+        # 有 tool_calls 时由 route_after_llm 交给 ToolNode 执行，再回到本节点生成最终回答
+        tool_calls = chunks[-1].tool_calls if chunks else []
+        ai_reply = AIMessage(content=content, tool_calls=tool_calls)
 
         return {"messages": [HumanMessage(content=input_str), ai_reply]}
 
@@ -168,10 +179,16 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             return [Send("retrieve_node", payload)]
         return [Send("llm_node", payload)]
 
+    def route_after_llm(state: OverAllState) -> str:
+        """llm_node 之后：有工具调用则执行 ToolNode，否则进入记忆节点收尾"""
+        last = state["messages"][-1]
+        return "tools" if getattr(last, "tool_calls", None) else "memory_node"
+
     builder = StateGraph(state_schema=OverAllState)
     builder.add_node("classify_node", classify_node)
     builder.add_node("retrieve_node", retrieve_node, cache_policy=CachePolicy(ttl=10))
     builder.add_node("llm_node", llm_node)
+    builder.add_node("tools", tool_node)
     builder.add_node("memory_node", memory_node)
 
     builder.add_edge(START, "classify_node")
@@ -181,7 +198,12 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         ["retrieve_node", "llm_node"],
     )
     builder.add_edge("retrieve_node", "llm_node")
-    builder.add_edge("llm_node", "memory_node")
+    builder.add_conditional_edges(
+        "llm_node",
+        route_after_llm,
+        ["tools", "memory_node"],
+    )
+    builder.add_edge("tools", "llm_node")  # 工具执行结果回到 LLM，生成最终回答
     builder.add_edge("memory_node", END)
 
     # 创建连接池（open=True 表示立即打开连接）

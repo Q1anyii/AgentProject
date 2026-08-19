@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 # 认证请求模型（MySQL 用户表校验）
@@ -9,7 +9,7 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     userName: str
     userId: str
-    password: str
+    password: str = Field(max_length=64)
     # 创建/更新时间由后端生成，前端注册时无需传入
     createTime: Optional[datetime] = None
     updateTime: Optional[datetime] = None

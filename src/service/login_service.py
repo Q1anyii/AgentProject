@@ -8,6 +8,7 @@ from loguru import logger
 
 from schemas.request_schemas.login_schema import LoginRequest
 from schemas.response_schemas.login_schema import LoginResponse
+from utils.jwt_utils import verify_password, get_password_hash
 
 
 class LoginService:
@@ -89,17 +90,22 @@ class LoginService:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def login(self, user_id, password)  :
+    def login(self, user_id, password):
         conn = self.get_connection()
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT * FROM userInfo WHERE user_id=%s AND password=%s",
-                (user_id, password)
+                "SELECT * FROM userInfo WHERE user_id=%s",
+                user_id
             )
             user_info = cur.fetchone()
             if user_info:
-                return user_info
+                if verify_password(password, user_info["password"]):
+                    return user_info
+                else:
+                    return "密码错误"
+            else:
+                return f"用户{user_id}不存在"
         except pymysql.OperationalError as e:
             logger.error(f"数据库连接异常 {e}")
             raise
@@ -110,8 +116,18 @@ class LoginService:
             logger.error(f"数据库执行异常 {e}")
             raise
 
-
-
+    def get_user_by_id(self, user_id):
+        """按用户 ID 查询用户信息（聊天接口 JWT 认证后获取当前用户）"""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM userInfo WHERE user_id=%s", (user_id,))
+            return cur.fetchone()
+        except pymysql.MySQLError as e:
+            logger.error(f"数据库执行异常 {e}")
+            raise
+        finally:
+            conn.close()
 
 
 # ---------------- 业务示例 登录查询用户 ----------------
