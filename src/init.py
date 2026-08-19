@@ -1,5 +1,6 @@
 import os
 
+import pymysql
 import requests
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from langchain.chat_models.base import init_chat_model
@@ -7,6 +8,7 @@ from FlagEmbedding import FlagReranker
 from langchain_community.document_loaders.text import TextLoader
 from langchain_openai import OpenAIEmbeddings
 from load_dotenv import load_dotenv
+from pymysql.cursors import DictCursor
 
 load_dotenv(override=True)
 

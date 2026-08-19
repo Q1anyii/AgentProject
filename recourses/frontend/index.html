@@ -349,11 +349,19 @@
             width: 40px;
             height: 40px;
             border-radius: var(--radius-md);
+            overflow: hidden;  /* 圆角裁剪内部图片，否则方形图片会盖住圆角 */
             background-color: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
+        }
+
+        .auth-logo-mark img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
         }
 
         .auth-quote {
@@ -1411,9 +1419,6 @@
                             <router-link to="/api/register">注册账号</router-link>
                             <router-link to="/api/recover">忘记密码？</router-link>
                         </div>
-                        <div class="auth-hint">
-                            调试账号：<code>user</code> / <code>1234</code>
-                        </div>
                     </div>
                 </div>
             `,
@@ -1442,7 +1447,7 @@
                     if (!this.validate()) return;
                     this.isSubmitting = true;
                     try {
-                        // 后端认证：静态测试账号 user / 1234
+                        // 后端认证：MySQL 用户表校验，成功后返回用户信息
                         const res = await fetch(`${API_BASE}/api/login`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1636,7 +1641,7 @@
                 <div class="auth-layout">
                     <div class="auth-brand">
                         <div class="auth-logo">
-                            <div class="auth-logo-mark">M</div>
+                            <div class="auth-logo-mark"><img src="/favicon.png" alt=""></div>
                             <span>Mitta AI</span>
                         </div>
                         <div class="auth-quote">

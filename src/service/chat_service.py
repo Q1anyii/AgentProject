@@ -73,7 +73,7 @@ class ChatService:
         try:
             self.pool.check()
         except Exception as e:
-            logger.error(f"数据库连接失败：{e}")
+            logger.error(f"PostgreSQL数据库连接失败：{e}")
             raise
         self.checkpointer = PostgresSaver(self.pool)  # ← self.
         self.store = PostgresStore(self.pool)  # ← self.
@@ -136,7 +136,16 @@ class ChatService:
             if meta.get("langgraph_node") != "llm_node":
                 continue
             if isinstance(chunk, AIMessageChunk) and chunk.content:
-                yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+                # content 可能是字符串或 list（多模态/工具消息），统一归一为纯文本，
+                # 否则前端 typeof === 'string' 检查失败会静默跳过，导致整轮流式不输出
+                content = chunk.content
+                if isinstance(content, list):
+                    content = "".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in content
+                    )
+                if content:
+                    yield f"data: {json.dumps({'content': content})}\n\n"
         yield f"data: [DONE]\n\n"
 
     def get_history_session(self, thread_id: str):

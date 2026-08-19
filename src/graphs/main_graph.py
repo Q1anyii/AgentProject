@@ -13,7 +13,7 @@ from pydantic import Field
 
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
-    from chat_service import ChatService
+    from service.chat_service import ChatService
 from graphs.rerank_graph import build_rerank_graph
 from init import model, system_prompt
 

@@ -7,7 +7,7 @@ from pydantic import Field, BaseModel
 
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
-    from chat_service import ChatService
+    from service.chat_service import ChatService
 from init import model, online_rerank
 
 
