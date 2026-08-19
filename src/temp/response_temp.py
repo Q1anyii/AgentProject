@@ -3,18 +3,13 @@ from fastapi.responses import JSONResponse
 class Response:
 
     @staticmethod
-    def success(message):
+    def success(*args):
+        content = {"ok": True, "message": args} if args else {"ok": True}
         return JSONResponse(
-                {"ok": True, "message": message},
+                content,
                 status_code=200,
             )
 
-    @staticmethod
-    def success():
-        return JSONResponse(
-            {"ok": True},
-            status_code=200,
-        )
 
     @staticmethod
     def failed(message):

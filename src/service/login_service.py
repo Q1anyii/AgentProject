@@ -136,21 +136,46 @@ class LoginService:
         update_time = datetime.now()
         username, user_id, password = args
         placeholders = ", ".join(["%s"] * (len(args)+3))
+        flag = False
         try:
             cur = conn.cursor()
-            sql = "SELECT * FROM userInfo WHERE user_id=%s"
+            sql = "SELECT user_id FROM userInfo WHERE user_id=%s"
             if cur.execute(sql, user_id):
-                return "该用户已存在"
+                return flag, "该用户已存在"
             password = get_password_hash(password)
             sql = f"INSERT into userinfo(id, user_id, password, username, create_time, update_time) VALUES ({placeholders})"
             success = cur.execute(sql, (Random.gen_simple_inc_random(), user_id, password, username, create_time, update_time))
-            return success
+            flag = True
+            return flag, success
         except pymysql.MySQLError as e:
             logger.error(f"数据库执行异常 {e}")
-            raise
+            return flag, f"数据库执行异常 {e}"
         finally:
             conn.close()
 
+    def recover(self, user_id, new_password):
+        update_time = datetime.now()
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            sql = "SELECT user_id, password FROM userInfo WHERE user_id = %s"
+            exist = cur.execute(sql, user_id)
+            if not exist:
+                return f"用户{user_id}不存在"
+            user_info = cur.fetchone()
+            user_id = user_info["user_id"]
+            old_password = user_info["password"]
+            if verify_password(new_password, old_password):
+                return f"密码不可与原密码相同"
+            new_password = get_password_hash(new_password)
+            sql = "UPDATE userInfo SET password = %s, update_time = %s WHERE user_id = %s"
+            success = cur.execute(sql, (new_password, update_time, user_id))
+            return success
+        except pymysql.MySQLError as e:
+            logger.error(f"数据库执行异常 {e}, 联系管理员")
+            raise
+        finally:
+            conn.close()
 
 
 # ---------------- 业务示例 登录查询用户 ----------------

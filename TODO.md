@@ -1,5 +1,3 @@
-
-
 # 项目待添加功能与改进点分析
 
 ## 一、`.TODO` 待添加功能逐项分析
@@ -30,7 +28,7 @@
 
 4. **无请求限流与并发保护**：`/api/chat/` 无速率限制，恶意/异常调用可打爆 DeepSeek API 配额。建议 slowapi 或中间件限流。
 
-5. **`get_user_sessions` 全表扫描**：[chat_service.py:194](file:///E:/工作文件/AgentProject/src/chat_service.py) `checkpointer.list(None)` 遍历所有 checkpoint 再按 user_id 过滤，会话量大时性能差。应为 PostgresSaver 的 checkpoint 表加 `user_id` 查询条件（metadata 已有该字段）。
+5. **`get_user_sessions` 全表扫描**：file:///E:/工作文件/AgentProject/src/chat_service.py `checkpointer.list(None)` 遍历所有 checkpoint 再按 user_id 过滤，会话量大时性能差。应为 PostgresSaver 的 checkpoint 表加 `user_id` 查询条件（metadata 已有该字段）。
 
 6. **每次对话 3 次 LLM 调用**：classify + 生成 + 记忆提取，记忆提取对**寒暄类**对话也白跑一次。可对 `needs_retrieval=False` 且无实质内容的对话跳过 `memory_node`，或记忆提取改为异步。
 

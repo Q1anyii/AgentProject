@@ -89,8 +89,12 @@ def delete_session_by_id(thread_id: str, current_user: TokenData = Depends(get_c
     owner = chat_service.get_thread_user_id(thread_id)
     if owner and owner != str(current_user.user_id) and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="无权删除该会话")
-    success = chat_service.delete_session_by_id(thread_id)
-    return Response.success(success)
+    flag, response = chat_service.delete_session_by_id(thread_id)
+    if flag:
+        return Response.success(response)
+    else:
+        return Response.failed(response)
+
 
 @app.get("/api/users/{user_id}/sessions")
 def get_sessions_by_user_id(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
@@ -128,22 +132,25 @@ def login(request_body: LoginRequest):
 @app.post("/api/register")
 def register(request_body: RegisterRequest):
 
-    success = login_service.register(*request_body)
-    if not success:
-        return Response.failed("注册失败")
-    elif success == 1:
-        return Response.success()
+    flag, response = login_service.register(*request_body)
+    if flag:
+        return Response.success(response)
     else:
-        return Response.failed(success)
-
+        return Response.failed(response)
 
 
 @app.post("/api/recover")
 def recover(request_body: RecoverRequest):
-    return JSONResponse(
-        {"ok": False, "message": "找回密码功能开发中，请联系管理员"},
-        status_code=400,
-    )
+    user_id = request_body.userId
+    new_password = request_body.newPassword
+    response = login_service.recover(user_id, new_password)
+    if not response:
+        return Response.failed("注册失败")
+    elif response == 1:
+        return Response.success()
+    else:
+        return Response.failed(response)
+
 
 # ===== 前端静态托管（开发模式：localhost:8000 直达页面，免 Nginx）=====
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "recourses" / "frontend"
