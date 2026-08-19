@@ -5,15 +5,13 @@ import chromadb
 
 from pathlib import Path
 from langgraph.cache.memory import InMemoryCache
-from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.store.postgres import PostgresStore
 from psycopg_pool import ConnectionPool
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from loguru import logger
 from graphs.main_graph import build_main_graph
 from graphs.rerank_graph import build_rerank_graph
-from init import COLLECTION_NAME
-
+from init import COLLECTION_NAME, CustomPostgresSaver
 
 """
 ChatService（类，收拢全部资源与业务方法）
@@ -36,8 +34,6 @@ ChatService（类，收拢全部资源与业务方法）
 │
 └── 模块级工厂 get_chat_service()   # 或直接由 lifespan new + open/close
 """
-
-
 
 
 class ChatService:
@@ -79,7 +75,7 @@ class ChatService:
         except Exception as e:
             logger.error(f"PostgreSQL数据库连接失败：{e}")
             raise
-        self.checkpointer = PostgresSaver(self.pool)  # ← self.
+        self.checkpointer = CustomPostgresSaver(self.pool)  # ← self.
         self.store = PostgresStore(self.pool)  # ← self.
         self.checkpointer.setup()
         self.store.setup()
@@ -188,6 +184,8 @@ class ChatService:
                 }
             )
         return history_session
+
+
 
     def get_thread_user_id(self, thread_id: str):
         """查询会话归属用户（用于 history/delete 接口的归属校验）"""

@@ -7,6 +7,7 @@ from langchain.chat_models.base import init_chat_model
 from FlagEmbedding import FlagReranker
 from langchain_community.document_loaders.text import TextLoader
 from langchain_openai import OpenAIEmbeddings
+from langgraph.checkpoint.postgres import PostgresSaver
 from load_dotenv import load_dotenv
 from pymysql.cursors import DictCursor
 
@@ -56,3 +57,27 @@ def online_rerank(query: str, documents: list[str], top_n: int = 10) -> list[dic
     return sorted(resp.json()["results"], key=lambda r: r["relevance_score"], reverse=True)
 
 COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
+
+class CustomPostgresSaver(PostgresSaver):
+    def list(
+        self,
+        *,
+        thread_id: str | None = None,
+        user_id: str | None = None,   # 扩展参数
+        filter: dict | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ):
+        """支持按 user_id(metadata内)过滤会话"""
+        if filter is None:
+            filter = {}
+        # 如果传入user_id，合并进filter
+        if user_id is not None:
+            filter["user_id"] = user_id
+
+        return super().list(
+            thread_id=thread_id,
+            filter=filter,
+            limit=limit,
+            offset=offset
+        )
