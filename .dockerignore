@@ -1,0 +1,61 @@
+# ============================================================
+# .dockerignore — Docker 构建时排除的文件
+# ============================================================
+
+# Git
+.git
+.gitignore
+.github
+
+# 环境变量（含密钥，不打包进镜像）
+.env
+*.env
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 测试
+.pytest_cache/
+tests/
+test/
+
+# 文档（可选，减小镜像体积）
+docs/
+*.md
+!README.md
+
+# 本地数据（向量库，通过 volume 挂载）
+resources/chroma_db/
+
+# 日志
+logs/
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*.old
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker 自身
+Dockerfile
+docker-compose.yml
+.dockerignore

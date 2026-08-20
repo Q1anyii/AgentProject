@@ -1,0 +1,2342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mitta AI — 智能客服</title>
+    <link rel="icon" href="favicon.png">
+    <!-- 字体：Space Grotesk（现代几何感标题）+ Inter（清晰正文） -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+    <!-- Vue 3 + Vue Router CDN（主源 jsdelivr，备源 unpkg/bootcdn，按顺序加载） -->
+    <script>
+        // CDN 加载失败检测与回退：按顺序尝试多个源
+        (function loadScript(srcs, callback) {
+            var i = 0;
+            (function tryNext() {
+                if (i >= srcs.length) {
+                    callback(false);
+                    return;
+                }
+                var s = document.createElement('script');
+                s.src = srcs[i++];
+                s.onload = function () { callback(true); };
+                s.onerror = tryNext;
+                document.head.appendChild(s);
+            })();
+        })([
+            'https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js',
+            'https://cdn.bootcdn.net/ajax/libs/vue/3.5.13/vue.global.prod.min.js',
+            'https://unpkg.com/vue@3/dist/vue.global.js'
+        ], function (ok) {
+            if (!ok) {
+                window.__vueFailed = true;
+                // 所有 CDN 源均失败：显示友好错误提示而非空白页
+                setTimeout(showLoadError, 1000);
+                return;
+            }
+            loadRouter();
+        });
+
+        function showLoadError() {
+            var app = document.getElementById('app');
+            if (app && (!window.Vue || !window.VueRouter)) {
+                app.innerHTML = [
+                    '<div style="display:flex;min-height:100vh;align-items:center;justify-content:center;font-family:sans-serif;background:#F7F5F0;">',
+                    '<div style="text-align:center;padding:40px;max-width:440px;">',
+                    '<h2 style="margin-bottom:12px;color:#1A1A19;">页面加载失败</h2>',
+                    '<p style="color:#6E6C66;line-height:1.7;font-size:14px;">',
+                    'Vue 框架资源加载失败，请检查网络连接后刷新重试。<br>',
+                    '若网络受限，请下载 vue.global.prod.js 与 vue-router.global.prod.js 到本地，',
+                    '并将 HTML 中 CDN 引用替换为本地路径。</p>',
+                    '</div></div>'
+                ].join('');
+            }
+        }
+
+        function loadRouter() {
+            (function loadScript(srcs, callback) {
+                var i = 0;
+                (function tryNext() {
+                    if (i >= srcs.length) {
+                        callback(false);
+                        return;
+                    }
+                    var s = document.createElement('script');
+                    s.src = srcs[i++];
+                    s.onload = function () { callback(true); };
+                    s.onerror = tryNext;
+                    document.head.appendChild(s);
+                })();
+            })([
+                'https://cdn.jsdelivr.net/npm/vue-router@4.5.0/dist/vue-router.global.prod.js',
+                'https://cdn.bootcdn.net/ajax/libs/vue-router/4.5.0/vue-router.global.prod.min.js',
+                'https://unpkg.com/vue-router@4/dist/vue-router.global.js'
+            ], function (ok) {
+                window.__routerReady = ok;
+                window.__depsReady = true;
+                if (ok) {
+                    // 依赖全部就绪，触发应用初始化
+                    var evt = new Event('deps-ready');
+                    window.dispatchEvent(evt);
+                } else {
+                    // Vue Router 加载失败：显示错误提示
+                    setTimeout(showLoadError, 1000);
+                }
+            });
+        }
+    </script>
+    <style>
+        /* ============================================================
+           设计令牌：色彩、字体、间距、阴影
+           ============================================================ */
+        :root {
+            /* 主色板：低饱和自然调，强调色偏深青绿 */
+            --bg-body: #F7F5F0;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #1C1E1D;
+            --bg-sidebar-hover: #252827;
+            --bg-input: #FFFFFF;
+            --bg-glass: rgba(255, 255, 255, 0.72);
+
+            --text-primary: #1A1A19;
+            --text-secondary: #6E6C66;
+            --text-muted: #9B9890;
+            --text-inverse: #F7F5F0;
+            --text-inverse-muted: #9CA3A0;
+
+            --accent: #3D6B5B;
+            --accent-light: #E7F0EC;
+            --accent-hover: #325C4D;
+            --accent-soft: rgba(61, 107, 91, 0.12);
+
+            --border: #E8E4DB;
+            --border-strong: #D9D4CA;
+            --danger: #B3564F;
+            --danger-light: #F9EBEA;
+            --success: #4A7C6F;
+            --warning: #C49A45;
+
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --radius-full: 9999px;
+
+            --shadow-xs: 0 1px 2px rgba(26, 26, 25, 0.04);
+            --shadow-sm: 0 2px 6px rgba(26, 26, 25, 0.06);
+            --shadow-md: 0 8px 24px rgba(26, 26, 25, 0.08);
+            --shadow-lg: 0 16px 40px rgba(26, 26, 25, 0.12);
+
+            --font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+            --sidebar-width: 300px;
+            --header-height: 68px;
+        }
+
+        /* ============================================================
+           基础重置
+           ============================================================ */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            font-family: var(--font-body);
+            font-weight: 400;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background-color: var(--bg-body);
+            overflow: hidden;
+        }
+
+        button, input, textarea {
+            font-family: inherit;
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            background: none;
+        }
+
+        *:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* ============================================================
+           通用组件
+           ============================================================ */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border-radius: var(--radius-md);
+            font-size: 0.9375rem;
+            font-weight: 500;
+            transition: all 200ms ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background-color: var(--accent);
+            color: white;
+            box-shadow: 0 4px 12px rgba(61, 107, 91, 0.25);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(61, 107, 91, 0.3);
+        }
+
+        .btn-primary:disabled {
+            background-color: var(--border-strong);
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+        }
+
+        .btn-ghost {
+            color: var(--text-secondary);
+            padding: 8px 12px;
+        }
+
+        .btn-ghost:hover {
+            background-color: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background-color: var(--bg-input);
+            font-size: 0.9375rem;
+            color: var(--text-primary);
+            transition: border-color 200ms, box-shadow 200ms;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-soft);
+            outline: none;
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-error {
+            font-size: 0.8125rem;
+            color: var(--danger);
+            margin-top: 4px;
+            min-height: 1.2em;
+        }
+
+        /* 全局过渡 */
+        .fade-enter-active,
+        .fade-leave-active {
+            transition: opacity 250ms ease;
+        }
+
+        .fade-enter-from,
+        .fade-leave-to {
+            opacity: 0;
+        }
+
+        .slide-up-enter-active,
+        .slide-up-leave-active {
+            transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .slide-up-enter-from,
+        .slide-up-leave-to {
+            opacity: 0;
+            transform: translateY(16px);
+        }
+
+        /* ============================================================
+           认证页面布局
+           ============================================================ */
+        .auth-layout {
+            display: flex;
+            min-height: 100vh;
+            width: 100vw;
+        }
+
+        .auth-brand {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 48px;
+            background: linear-gradient(145deg, #2D3E38 0%, #1C1E1D 100%);
+            color: var(--text-inverse);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .auth-brand::before {
+            content: '';
+            position: absolute;
+            top: -20%;
+            right: -10%;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(61, 107, 91, 0.25) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .auth-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 600;
+            z-index: 1;
+        }
+
+        .auth-logo-mark {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            overflow: hidden;  /* 圆角裁剪内部图片，否则方形图片会盖住圆角 */
+            background-color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .auth-logo-mark img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .auth-quote {
+            max-width: 420px;
+            z-index: 1;
+        }
+
+        .auth-quote h2 {
+            font-family: var(--font-display);
+            font-size: 2.75rem;
+            font-weight: 500;
+            line-height: 1.15;
+            margin-bottom: 20px;
+            letter-spacing: -0.02em;
+        }
+
+        .auth-quote p {
+            font-size: 1.0625rem;
+            color: var(--text-inverse-muted);
+            line-height: 1.7;
+        }
+
+        .auth-footer {
+            font-size: 0.8125rem;
+            color: var(--text-inverse-muted);
+            z-index: 1;
+        }
+
+        .auth-form-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+            background-color: var(--bg-body);
+        }
+
+        .auth-card {
+            width: 100%;
+            max-width: 420px;
+            padding: 48px;
+            background-color: var(--bg-surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-md);
+        }
+
+        .auth-card h1 {
+            font-family: var(--font-display);
+            font-size: 1.875rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            letter-spacing: -0.01em;
+        }
+
+        .auth-subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            font-size: 0.9375rem;
+        }
+
+        .auth-submit {
+            width: 100%;
+            margin-top: 8px;
+            padding: 14px;
+        }
+
+        .auth-links {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            font-size: 0.875rem;
+        }
+
+        .auth-links a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .auth-links a:hover {
+            text-decoration: underline;
+        }
+
+        .auth-hint {
+            margin-top: 24px;
+            padding: 12px;
+            background-color: var(--accent-light);
+            border-radius: var(--radius-md);
+            font-size: 0.8125rem;
+            color: var(--accent-hover);
+            text-align: center;
+        }
+
+        .auth-hint code {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: rgba(61, 107, 91, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* ============================================================
+           聊天应用布局
+           ============================================================ */
+        .chat-layout {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--bg-sidebar);
+            color: var(--text-inverse);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 50;
+        }
+
+        .sidebar-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .sidebar-brand-mark {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            overflow: hidden;  /* 与登录页 auth-logo-mark 保持一致：圆角裁剪内部图片 */
+            background-color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .sidebar-brand-mark img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .new-chat-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-inverse-muted);
+            background-color: rgba(255, 255, 255, 0.06);
+            transition: all 200ms ease;
+        }
+
+        .new-chat-btn:hover {
+            background-color: rgba(255, 255, 255, 0.12);
+            color: white;
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .session-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .session-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .session-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 2px;
+        }
+
+        .session-item {
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 4px;
+            border-radius: var(--radius-md);
+            text-align: left;
+            font-size: 0.875rem;
+            color: var(--text-inverse-muted);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            transition: all 200ms ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .session-item:hover {
+            background-color: var(--bg-sidebar-hover);
+            color: var(--text-inverse);
+        }
+
+        .session-item.active {
+            background-color: rgba(61, 107, 91, 0.25);
+            color: white;
+        }
+
+        .session-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 18px;
+            background-color: var(--accent);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .session-icon {
+            flex-shrink: 0;
+            color: inherit;
+            opacity: 0.7;
+        }
+
+        .session-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .session-delete {
+            opacity: 0;
+            width: 26px;
+            height: 26px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: inherit;
+            transition: all 200ms ease;
+            flex-shrink: 0;
+        }
+
+        .session-item:hover .session-delete {
+            opacity: 1;
+        }
+
+        .session-delete:hover {
+            background-color: rgba(179, 86, 79, 0.2);
+            color: #F5A8A3;
+        }
+
+        .sidebar-footer {
+            padding: 16px 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: var(--radius-md);
+            background-color: rgba(255, 255, 255, 0.04);
+            margin-bottom: 12px;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-full);
+            background: linear-gradient(135deg, var(--accent), #2D5A4C);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 0.875rem;
+            flex-shrink: 0;
+        }
+
+        .user-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .user-name {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: white;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-role {
+            font-size: 0.75rem;
+            color: var(--text-inverse-muted);
+        }
+
+        .logout-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-inverse-muted);
+            transition: all 200ms ease;
+            flex-shrink: 0;
+        }
+
+        .logout-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .health-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            color: var(--text-inverse-muted);
+        }
+
+        .health-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--success);
+            transition: background-color 300ms;
+        }
+
+        .health-dot.degraded {
+            background-color: var(--warning);
+        }
+
+        .health-dot.offline {
+            background-color: var(--danger);
+        }
+
+        /* ============================================================
+           主聊天区
+           ============================================================ */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            background-color: var(--bg-body);
+            position: relative;
+        }
+
+        .main-header {
+            height: var(--header-height);
+            padding: 0 32px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .menu-toggle {
+            display: none;
+            width: 40px;
+            height: 40px;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+        }
+
+        .menu-toggle:hover {
+            background-color: var(--bg-surface);
+        }
+
+        .current-session-title {
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            transition: all 200ms ease;
+        }
+
+        .icon-btn:hover {
+            background-color: var(--bg-surface);
+            color: var(--text-primary);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 32px;
+            scroll-behavior: smooth;
+        }
+
+        .messages-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .messages-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .messages-container::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .messages-wrapper {
+            max-width: 780px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .welcome-state {
+            text-align: center;
+            padding: 80px 0;
+        }
+
+        .welcome-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: var(--radius-full);
+            background-color: var(--accent-light);
+            color: var(--accent);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            margin-bottom: 24px;
+        }
+
+        .welcome-state h1 {
+            font-family: var(--font-display);
+            font-size: 2.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+        }
+
+        .welcome-state p {
+            font-size: 1.0625rem;
+            color: var(--text-secondary);
+            max-width: 440px;
+            margin: 0 auto 32px;
+            line-height: 1.7;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        .quick-action {
+            padding: 12px 18px;
+            border-radius: var(--radius-md);
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            transition: all 200ms ease;
+            box-shadow: var(--shadow-xs);
+        }
+
+        .quick-action:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* ============================================================
+           消息气泡
+           ============================================================ */
+        .message {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            animation: messageIn 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes messageIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 0.8125rem;
+            font-weight: 600;
+        }
+
+        .message.user .message-avatar {
+            background-color: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .message.assistant .message-avatar {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .message-content-wrapper {
+            flex: 1;
+            min-width: 0;
+            max-width: calc(100% - 50px);
+        }
+
+        .message-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .message-content {
+            font-size: 0.9375rem;
+            line-height: 1.75;
+            color: var(--text-primary);
+            padding: 16px 18px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            background-color: var(--bg-surface);
+            box-shadow: var(--shadow-xs);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .message.assistant .message-content {
+            border-left: 3px solid var(--accent);
+        }
+
+        .message.user .message-content {
+            background-color: var(--bg-surface);
+        }
+
+        /* 思考中动画 */
+        .thinking-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .thinking-dots {
+            display: flex;
+            gap: 5px;
+        }
+
+        .thinking-dots span {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--text-muted);
+            animation: thinkingPulse 1.5s ease-in-out infinite;
+        }
+
+        .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes thinkingPulse {
+            0%, 80%, 100% { opacity: 0.35; transform: scale(0.85); }
+            40% { opacity: 1; transform: scale(1); }
+        }
+
+        .thinking-text {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* ============================================================
+           输入区
+           ============================================================ */
+        .input-area {
+            flex-shrink: 0;
+            padding: 20px 32px 28px;
+            background-color: var(--bg-body);
+        }
+
+        .input-card {
+            max-width: 780px;
+            margin: 0 auto;
+            padding: 14px 18px;
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-md);
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            transition: border-color 200ms, box-shadow 200ms;
+        }
+
+        .input-card:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 8px 28px rgba(61, 107, 91, 0.12);
+        }
+
+        .chat-input {
+            flex: 1;
+            min-height: 28px;
+            max-height: 160px;
+            padding: 10px 4px;
+            border: none;
+            background: transparent;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            resize: none;
+            outline: none;
+            overflow-y: auto;
+        }
+
+        .chat-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: var(--radius-md);
+            background-color: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 200ms ease;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .send-btn:disabled {
+            background-color: var(--border-strong);
+            cursor: not-allowed;
+        }
+
+        .input-hint {
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 12px;
+        }
+
+        /* ============================================================
+           遮罩与移动端
+           ============================================================ */
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background-color: rgba(26, 26, 25, 0.35);
+            backdrop-filter: blur(2px);
+            z-index: 40;
+            opacity: 0;
+            transition: opacity 250ms ease;
+        }
+
+        .overlay.active {
+            display: block;
+            opacity: 1;
+        }
+
+        @media (max-width: 900px) {
+            .auth-layout {
+                flex-direction: column;
+            }
+            .auth-brand {
+                min-height: 240px;
+                padding: 32px;
+            }
+            .auth-quote h2 {
+                font-size: 2rem;
+            }
+            .auth-form-wrapper {
+                padding: 32px 24px;
+            }
+            .auth-card {
+                padding: 32px 24px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                height: 100vh;
+                transform: translateX(-100%);
+                box-shadow: var(--shadow-lg);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .menu-toggle {
+                display: flex;
+            }
+            .main-header {
+                padding: 0 16px;
+            }
+            .messages-container {
+                padding: 16px;
+            }
+            .input-area {
+                padding: 12px 16px 20px;
+            }
+            .welcome-state h1 {
+                font-size: 1.75rem;
+            }
+            .current-session-title {
+                font-size: 1rem;
+                font-family: var(--font-body);
+                font-weight: 500;
+            }
+        }
+
+        /* ============================================================
+           Toast 提示
+           ============================================================ */
+        .toast {
+            position: fixed;
+            bottom: 28px;
+            left: 50%;
+            transform: translateX(-50%) translateY(120px);
+            padding: 12px 24px;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            box-shadow: var(--shadow-lg);
+            z-index: 100;
+            opacity: 0;
+            transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .toast.error {
+            background-color: var(--danger);
+            color: white;
+        }
+
+        .toast.success {
+            background-color: var(--success);
+            color: white;
+        }
+
+        .toast.info {
+            background-color: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        /* ============================================================
+           空状态
+           ============================================================ */
+        .empty-state {
+            text-align: center;
+            padding: 48px 0;
+            color: var(--text-inverse-muted);
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script>
+        /**
+         * 应用主脚本：等待 Vue/VueRouter CDN 加载完成后再执行
+         */
+        (function boot() {
+            // 防重入：deps-ready 事件与 8s 兜底定时器可能先后触发本函数两次，
+            // 二次 createApp().mount() 会在卸载旧树时触发 removeFragment 的
+            // nextSibling 空指针崩溃（白屏）。已挂载过则直接返回。
+            if (window.__mittaBooted) {
+                return;
+            }
+            if (!window.Vue || !window.VueRouter) {
+                // 依赖未就绪：监听加载完成事件，并设置超时兜底
+                window.addEventListener('deps-ready', boot, { once: true });
+                setTimeout(function () {
+                    if (window.Vue && window.VueRouter) {
+                        boot();
+                    } else {
+                        // 超时仍未就绪：显示错误提示而非空白页
+                        var app = document.getElementById('app');
+                        if (app) {
+                            app.innerHTML = [
+                                '<div style="display:flex;min-height:100vh;align-items:center;justify-content:center;font-family:sans-serif;background:#F7F5F0;">',
+                                '<div style="text-align:center;padding:40px;max-width:440px;">',
+                                '<h2 style="margin-bottom:12px;color:#1A1A19;">页面加载失败</h2>',
+                                '<p style="color:#6E6C66;line-height:1.7;font-size:14px;">',
+                                'Vue 框架资源加载失败，请检查网络连接后刷新重试。</p>',
+                                '</div></div>'
+                            ].join('');
+                        }
+                    }
+                }, 8000);
+                return;
+            }
+
+            window.__mittaBooted = true; // 仅允许挂载一次
+
+            const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+        const { createRouter, createWebHistory, useRouter } = VueRouter;
+
+        // ============================================================
+        // 常量与配置
+        // ============================================================
+        const API_BASE = ''; // 相对路径，与后端同域
+        const STORAGE_KEY = {
+            USER: 'mitta_auth_user',
+            SESSIONS: 'mitta_sessions',
+            CURRENT_THREAD: 'mitta_current_thread',
+            LAST_ACTIVE: 'mitta_last_active',
+            AI_CALL_NAME: 'mitta_ai_call_name' // 注册时设置的用户名，AI 以此称呼用户
+        };
+        const CACHE_TTL_DAYS = 7;
+
+
+        // ============================================================
+        // 工具函数
+        // ============================================================
+        function generateId() {
+            return 'thread_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+        }
+
+        function formatTime(date = new Date()) {
+            return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 兼容 content 为字符串或列表（AIMessageChunk 多模态格式）的情况
+        function extractContentText(content) {
+            if (typeof content === 'string') return content;
+            if (Array.isArray(content)) {
+                return content.map(part => {
+                    if (typeof part === 'string') return part;
+                    if (part && typeof part === 'object') return part.text || '';
+                    return '';
+                }).join('');
+            }
+            return '';
+        }
+
+        // ============================================================
+        // 缓存管理
+        // ============================================================
+        const cache = {
+            get(key, defaultValue = null) {
+                try {
+                    const raw = localStorage.getItem(key);
+                    if (!raw) return defaultValue;
+                    const data = JSON.parse(raw);
+                    if (data && data.__expires && Date.now() > data.__expires) {
+                        localStorage.removeItem(key);
+                        return defaultValue;
+                    }
+                    return data.value;
+                } catch {
+                    return defaultValue;
+                }
+            },
+            set(key, value, ttlDays = CACHE_TTL_DAYS) {
+                try {
+                    localStorage.setItem(key, JSON.stringify({
+                        value,
+                        __expires: Date.now() + ttlDays * 24 * 60 * 60 * 1000
+                    }));
+                } catch (e) {
+                    console.warn('localStorage 写入失败:', e);
+                }
+            },
+            remove(key) {
+                localStorage.removeItem(key);
+            },
+            messagesKey(threadId) {
+                return `mitta_messages_${threadId}`;
+            },
+            getMessages(threadId) {
+                return this.get(this.messagesKey(threadId), []);
+            },
+            setMessages(threadId, messages) {
+                this.set(this.messagesKey(threadId), messages);
+            },
+            removeMessages(threadId) {
+                this.remove(this.messagesKey(threadId));
+            }
+        };
+
+        function updateLastActive() {
+            cache.set(STORAGE_KEY.LAST_ACTIVE, Date.now(), CACHE_TTL_DAYS);
+        }
+
+        // 会话缓存 key 按用户隔离：不同账号各看各的会话列表/当前线程，
+        // 否则切换账号后侧边栏会残留上一个账号的会话（点击后触发 403，造成"会话共享"假象）
+        function sessionCacheKey(key) {
+            const u = cache.get(STORAGE_KEY.USER, null);
+            return u && u.userId ? `${key}_${u.userId}` : key;
+        }
+
+        // ============================================================
+        // API 调用
+        // ============================================================
+        // 构造带 JWT 的请求头（登录时 token 存于 STORAGE_KEY.USER.token）
+        function authHeaders(extra = {}) {
+            const user = cache.get(STORAGE_KEY.USER, null);
+            if (user && user.token) {
+                return { Authorization: `Bearer ${user.token}`, ...extra };
+            }
+            return extra;
+        }
+
+        // 隐式续签：access token 过期时后端自动用 refresh（仅存 Redis）换新 token，
+        // 通过响应头 X-New-Access-Token 回传，这里同步本地登录态，前端全程无感知
+        function syncTokenFromHeaders(headers) {
+            const newToken = headers.get('x-new-access-token');
+            if (!newToken) return;
+            const user = cache.get(STORAGE_KEY.USER, null);
+            if (user) {
+                user.token = newToken;
+                cache.set(STORAGE_KEY.USER, user);
+            }
+        }
+
+        // 统一处理 401：token 缺失/过期，清除登录态并回到登录页
+        function handleAuthError(response) {
+            if (response.status === 401) {
+                cache.remove(STORAGE_KEY.USER);
+                if (window.location.pathname !== '/api/login') {
+                    window.location.href = '/api/login';
+                }
+                throw new Error('登录已过期，请重新登录');
+            }
+        }
+
+        async function apiChat(query, threadId, onStream) {
+            const response = await fetch(`${API_BASE}/api/chat/`, {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ query, thread_id: threadId })
+            });
+            syncTokenFromHeaders(response.headers);
+            handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权使用该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
+            if (!response.ok) throw new Error(`请求失败: ${response.status}`);
+
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
+                const data = await response.json();
+                return data.answer || '';
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let answer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split('\n\n');
+                buffer = events.pop();
+                for (const event of events) {
+                    const line = event.trim();
+                    if (!line.startsWith('data:')) continue;
+                    const payload = line.slice(5).trim();
+                    if (!payload || payload === '[DONE]') continue;
+                    let chunk;
+                    try {
+                        chunk = JSON.parse(payload);
+                    } catch {
+                        continue; // 跳过损坏的 SSE 数据，不中断整个流
+                    }
+                    const text = extractContentText(chunk.content);
+                    if (text) {
+                        answer += text;
+                        if (onStream) onStream(answer);
+                    }
+                }
+            }
+            return answer;
+        }
+
+        async function apiGetHistory(threadId) {
+            const response = await fetch(`${API_BASE}/api/chat/${threadId}/history`, {
+                headers: authHeaders()
+            });
+            syncTokenFromHeaders(response.headers);
+            handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权访问该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
+            if (!response.ok) throw new Error(`获取历史失败: ${response.status}`);
+            return response.json();
+        }
+
+        async function apiDeleteSession(threadId) {
+            const response = await fetch(`${API_BASE}/api/chat/${threadId}`, {
+                method: 'DELETE',
+                headers: authHeaders()
+            });
+            syncTokenFromHeaders(response.headers);
+            handleAuthError(response);
+            if (response.status === 403) {
+                // 会话归属校验：会话属于其他账号
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(data.detail || '无权删除该会话（会话可能属于其他账号）');
+                err.status = 403;
+                throw err;
+            }
+            if (!response.ok) throw new Error(`删除失败: ${response.status}`);
+            return response.json();
+        }
+
+        async function apiHealthCheck() {
+            try {
+                const response = await fetch(`${API_BASE}/health`, { method: 'GET' });
+                if (!response.ok) return { status: 'degraded', db: false };
+                return response.json();
+            } catch {
+                return { status: 'degraded', db: false };
+            }
+        }
+
+        // 统一解析后端 JSON 响应：兼容 401/400 错误体与 422 校验错误的 detail 数组
+        async function parseApiResponse(res) {
+            let data = {};
+            try {
+                data = await res.json();
+            } catch {
+                // 非 JSON 响应（如 500 空页），走下方统一错误文案
+            }
+            if (data.ok) return { ok: true, data };
+            let message = data.message;
+            if (!message && Array.isArray(data.detail)) {
+                message = data.detail.map(d => d.msg || '').filter(Boolean).join('；');
+            }
+            return { ok: false, message: message || `请求失败(${res.status})` };
+        }
+
+        // ============================================================
+        // 认证相关组件
+        // ============================================================
+        const LoginForm = {
+            template: `
+                <div class="auth-form-wrapper">
+                    <div class="auth-card">
+                        <h1>欢迎回来</h1>
+                        <p class="auth-subtitle">登录后继续与 Mitta 智能客服对话</p>
+                        <form @submit.prevent="handleLogin">
+                            <div class="form-group">
+                                <label class="form-label">用户 ID</label>
+                                <input v-model="form.userId" type="text" class="form-input" placeholder="请输入用户 ID" autocomplete="username">
+                                <div class="form-error">{{ errors.userId }}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">密码</label>
+                                <input v-model="form.password" type="password" class="form-input" placeholder="请输入密码" autocomplete="current-password">
+                                <div class="form-error">{{ errors.password }}</div>
+                            </div>
+                            <button type="submit" class="btn btn-primary auth-submit" :disabled="isSubmitting">
+                                <span v-if="isSubmitting">登录中...</span>
+                                <span v-else>登录</span>
+                            </button>
+                        </form>
+                        <div class="auth-links">
+                            <router-link to="/api/register">注册账号</router-link>
+                            <router-link to="/api/recover">忘记密码？</router-link>
+                        </div>
+                    </div>
+                </div>
+            `,
+            data() {
+                return {
+                    form: { userId: '', password: '' },
+                    errors: { userId: '', password: '' },
+                    isSubmitting: false
+                };
+            },
+            methods: {
+                validate() {
+                    let valid = true;
+                    this.errors = { userId: '', password: '' };
+                    if (!this.form.userId.trim()) {
+                        this.errors.userId = '请输入用户 ID';
+                        valid = false;
+                    }
+                    if (!this.form.password) {
+                        this.errors.password = '请输入密码';
+                        valid = false;
+                    }
+                    return valid;
+                },
+                async handleLogin() {
+                    if (!this.validate()) return;
+                    this.isSubmitting = true;
+                    try {
+                        // 后端认证：MySQL 用户表校验，成功返回 { ok, token, user_info }
+                        const res = await fetch(`${API_BASE}/api/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId: this.form.userId.trim(), password: this.form.password })
+                        });
+                        const { ok, data, message } = await parseApiResponse(res);
+                        // 后端契约：ok=true 且 user_info 非空才算登录成功（用户不存在时返回 401）
+                        if (ok && data.user_info) {
+                            // 只存展示所需字段并剔除密码等敏感信息，避免整行落 localStorage
+                            const u = data.user_info;
+                            cache.set(STORAGE_KEY.USER, {
+                                userId: u.userId ?? u.user_id,
+                                name: u.name ?? u.username ?? u.userName,
+                                role: u.role || '学员',
+                                token: data.token
+                            });
+                            updateLastActive();
+                            this.$router.push('/chat');
+                        } else {
+                            this.errors.password = message || '用户 ID 或密码错误';
+                        }
+                    } catch (err) {
+                        this.errors.password = '网络异常，请稍后重试';
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                }
+            }
+        };
+
+        const RegisterForm = {
+            template: `
+                <div class="auth-form-wrapper">
+                    <div class="auth-card">
+                        <h1>创建账号</h1>
+                        <p class="auth-subtitle">注册后即可体验智能客服服务</p>
+                        <form @submit.prevent="handleRegister">
+                            <div class="form-group">
+                                <label class="form-label">用户名</label>
+                                <input v-model="form.name" type="text" class="form-input" placeholder="设置用户名，AI 将这样称呼您" maxlength="20">
+                                <div class="form-error">{{ errors.name }}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">用户 ID</label>
+                                <input v-model="form.userId" type="text" class="form-input" placeholder="设置用户 ID">
+                                <div class="form-error">{{ errors.userId }}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">密码</label>
+                                <input v-model="form.password" type="password" class="form-input" placeholder="设置密码">
+                                <div class="form-error">{{ errors.password }}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">确认密码</label>
+                                <input v-model="form.confirmPassword" type="password" class="form-input" placeholder="再次输入密码">
+                                <div class="form-error">{{ errors.confirmPassword }}</div>
+                            </div>
+                            <div class="form-error auth-msg">{{ formMsg }}</div>
+                            <button type="submit" class="btn btn-primary auth-submit" :disabled="isSubmitting">
+                                <span v-if="isSubmitting">注册中...</span>
+                                <span v-else>注册</span>
+                            </button>
+                        </form>
+                        <div class="auth-links">
+                            <router-link to="/api/login">已有账号？登录</router-link>
+                        </div>
+                    </div>
+                </div>
+            `,
+            data() {
+                return {
+                    form: { userId: '', password: '', confirmPassword: '', name: '' },
+                    errors: { userId: '', password: '', confirmPassword: '', name: '' },
+                    formMsg: '',
+                    isSubmitting: false
+                };
+            },
+            methods: {
+                validate() {
+                    let valid = true;
+                    this.errors = { userId: '', password: '', confirmPassword: '', name: '' };
+                    if (!this.form.userId.trim()) {
+                        this.errors.userId = '请输入用户 ID';
+                        valid = false;
+                    }
+                    if (this.form.password.length < 4) {
+                        this.errors.password = '密码至少 4 位';
+                        valid = false;
+                    }
+                    if (this.form.password !== this.form.confirmPassword) {
+                        this.errors.confirmPassword = '两次输入密码不一致';
+                        valid = false;
+                    }
+                    if (!this.form.name.trim()) {
+                        this.errors.name = '请输入用户名（AI 称呼）';
+                        valid = false;
+                    }
+                    return valid;
+                },
+                async handleRegister() {
+                    if (!this.validate()) return;
+                    this.isSubmitting = true;
+                    // 本地保存 AI 称呼，注册成功后登录即生效
+                    cache.set(STORAGE_KEY.AI_CALL_NAME, this.form.name.trim());
+                    try {
+                        // 字段与后端 RegisterRequest 契约一致：userName / userId / password
+                        const res = await fetch(`${API_BASE}/api/register`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                userName: this.form.name.trim(),
+                                userId: this.form.userId.trim(),
+                                password: this.form.password
+                            })
+                        });
+                        const { ok, message } = await parseApiResponse(res);
+                        this.formMsg = message || (ok ? '注册成功' : '注册失败');
+                    } catch (err) {
+                        this.formMsg = '网络异常，请稍后重试';
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                }
+            }
+        };
+
+        const RecoverForm = {
+            template: `
+                <div class="auth-form-wrapper">
+                    <div class="auth-card">
+                        <h1>找回密码</h1>
+                        <p class="auth-subtitle">输入用户 ID，我们将为您重置密码</p>
+                        <form @submit.prevent="handleRecover">
+                            <div class="form-group">
+                                <label class="form-label">用户 ID</label>
+                                <input v-model="form.userId" type="text" class="form-input" placeholder="请输入用户 ID">
+                                <div class="form-error">{{ errors.userId }}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">新密码</label>
+                                <input v-model="form.newPassword" type="password" class="form-input" placeholder="设置新密码">
+                                <div class="form-error">{{ errors.newPassword }}</div>
+                            </div>
+                            <div class="form-error auth-msg">{{ formMsg }}</div>
+                            <button type="submit" class="btn btn-primary auth-submit" :disabled="isSubmitting">
+                                <span v-if="isSubmitting">处理中...</span>
+                                <span v-else>重置密码</span>
+                            </button>
+                        </form>
+                        <div class="auth-links">
+                            <router-link to="/api/login">返回登录</router-link>
+                        </div>
+                    </div>
+                </div>
+            `,
+            data() {
+                return {
+                    form: { userId: '', newPassword: '' },
+                    errors: { userId: '', newPassword: '' },
+                    formMsg: '',
+                    isSubmitting: false
+                };
+            },
+            methods: {
+                validate() {
+                    let valid = true;
+                    this.errors = { userId: '', newPassword: '' };
+                    if (!this.form.userId.trim()) {
+                        this.errors.userId = '请输入用户 ID';
+                        valid = false;
+                    }
+                    if (this.form.newPassword.length < 4) {
+                        this.errors.newPassword = '新密码至少 4 位';
+                        valid = false;
+                    }
+                    return valid;
+                },
+                async handleRecover() {
+                    if (!this.validate()) return;
+                    this.isSubmitting = true;
+                    try {
+                        // 字段与后端 RecoverRequest 契约一致：userId / newPassword
+                        const res = await fetch(`${API_BASE}/api/recover`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId: this.form.userId.trim(), newPassword: this.form.newPassword })
+                        });
+                        const { ok, message } = await parseApiResponse(res);
+                        this.formMsg = message || (ok ? '密码已重置' : '重置失败');
+                    } catch (err) {
+                        this.formMsg = '网络异常，请稍后重试';
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                }
+            }
+        };
+
+        const AuthLayout = {
+            template: `
+                <div class="auth-layout">
+                    <div class="auth-brand">
+                        <div class="auth-logo">
+                            <div class="auth-logo-mark"><img src="/favicon.png" alt=""></div>
+                            <span>Mitta AI</span>
+                        </div>
+                        <div class="auth-quote">
+                            <h2>让每一次对话都更有价值</h2>
+                            <p>基于 LangGraph 与 RAG 技术的在线学习平台智能客服，为您提供准确、连贯、个性化的问答体验。</p>
+                        </div>
+                        <div class="auth-footer">© 2026 Mitta AI. All rights reserved.</div>
+                    </div>
+                    <router-view v-slot="{ Component }">
+                        <!-- 不用 out-in 过渡：mode="out-in" 切换时计算 anchor 会触发 nextSibling 空指针崩溃 -->
+                        <component v-if="Component" :is="Component" />
+                    </router-view>
+                </div>
+            `
+        };
+
+        // ============================================================
+        // 聊天应用组件
+        // ============================================================
+        const ChatApp = {
+            template: `
+                <div class="chat-layout">
+                    <aside class="sidebar" :class="{ open: sidebarOpen }" role="navigation" aria-label="会话列表">
+                        <div class="sidebar-header">
+                            <div class="sidebar-brand">
+                                <div class="sidebar-brand-mark"><img src="/favicon.png" alt=""></div>
+                                <span>Mitta AI</span>
+                            </div>
+                            <button class="new-chat-btn" @click="createNewSession" title="新建会话" aria-label="新建会话">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="session-list">
+                            <div v-if="sessions.length === 0" class="empty-state">
+                                <p>暂无会话</p>
+                            </div>
+                            <button
+                                v-for="session in sessions"
+                                :key="session.id"
+                                class="session-item"
+                                :class="{ active: session.id === currentThreadId }"
+                                @click="switchSession(session.id)"
+                                :aria-label="'切换到会话: ' + session.title"
+                            >
+                                <svg class="session-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                                <span class="session-name">{{ session.title }}</span>
+                                <span class="session-delete" @click.stop="deleteSession(session.id)" role="button" aria-label="删除会话">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="sidebar-footer">
+                            <div class="user-card">
+                                <div class="user-avatar">{{ userAvatar }}</div>
+                                <div class="user-info">
+                                    <div class="user-name">{{ user?.name || '用户' }}</div>
+                                    <div class="user-role">{{ user?.role || '学员' }}</div>
+                                </div>
+                                <button class="logout-btn" @click="logout" title="退出登录" aria-label="退出登录">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                        <polyline points="16 17 21 12 16 7"></polyline>
+                                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="health-status">
+                                <span class="health-dot" :class="healthStatus"></span>
+                                <span>{{ healthText }}</span>
+                            </div>
+                        </div>
+                    </aside>
+
+                    <div class="overlay" :class="{ active: sidebarOpen }" @click="closeSidebar"></div>
+
+                    <main class="main-area">
+                        <header class="main-header">
+                            <div class="header-left">
+                                <button class="menu-toggle" @click="openSidebar" aria-label="展开菜单">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                                    </svg>
+                                </button>
+                                <h2 class="current-session-title">{{ currentSessionTitle }}</h2>
+                            </div>
+                            <div class="header-actions">
+                                <button class="icon-btn" @click="clearCurrentChat" title="清空当前会话" aria-label="清空当前会话">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </header>
+
+                        <div class="messages-container" ref="messagesContainer">
+                            <div class="messages-wrapper">
+                                <div v-if="messages.length === 0" class="welcome-state">
+                                    <div class="welcome-badge">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                        </svg>
+                                        智能客服已就绪
+                                    </div>
+                                    <h1>您好，{{ greetingName }}！有什么可以帮您的？</h1>
+                                    <p>开始一段新的对话，或从左侧选择一个历史会话继续交流。</p>
+                                    <div class="quick-actions">
+                                        <button v-for="q in quickQuestions" :key="q" class="quick-action" @click="sendQuick(q)">{{ q }}</button>
+                                    </div>
+                                </div>
+
+                                <div
+                                    v-for="(msg, index) in messages"
+                                    :key="msg.id || index"
+                                    class="message"
+                                    :class="msg.role"
+                                >
+                                    <div class="message-avatar" aria-hidden="true">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
+                                    <div class="message-content-wrapper">
+                                        <div class="message-meta">
+                                            <span>{{ msg.role === 'user' ? '您' : 'AI 助手' }}</span>
+                                            <span>·</span>
+                                            <span>{{ msg.time }}</span>
+                                        </div>
+                                        <div class="message-content">
+                                            <!-- v-show 双节点常驻：切换只改 display，不触发挂载/卸载，
+                                                规避 v-if/v-else 静态块提升 + insertStaticContent 的
+                                                nextSibling 空指针崩溃（Vue 3.5 流式切换白屏问题） -->
+                                            <div v-show="msg.content" v-html="escapeHtml(msg.content)"></div>
+                                            <div v-show="!msg.content" class="thinking-indicator">
+                                                <div class="thinking-dots"><span></span><span></span><span></span></div>
+                                                <span class="thinking-text">正在思考...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-area">
+                            <div class="input-card">
+                                <textarea
+                                    v-model="inputText"
+                                    class="chat-input"
+                                    placeholder="输入您的问题..."
+                                    rows="1"
+                                    aria-label="消息输入框"
+                                    @keydown="handleKeydown"
+                                    @input="autoResize"
+                                    ref="textarea"
+                                ></textarea>
+                                <button class="send-btn" @click="sendMessage" :disabled="!canSend" aria-label="发送消息">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="input-hint">按 Enter 发送，Shift + Enter 换行</p>
+                        </div>
+                    </main>
+                </div>
+            `,
+            setup() {
+                const router = useRouter();
+                const user = ref(cache.get(STORAGE_KEY.USER, null));
+                const sessions = ref(cache.get(sessionCacheKey(STORAGE_KEY.SESSIONS), []));
+                const currentThreadId = ref(cache.get(sessionCacheKey(STORAGE_KEY.CURRENT_THREAD), null));
+                const messages = ref([]);
+                const inputText = ref('');
+                const isLoading = ref(false);
+                const streaming = ref(false);
+                const sidebarOpen = ref(false);
+                const healthStatus = ref('online');
+                const messagesContainer = ref(null);
+                const textarea = ref(null);
+
+                const quickQuestions = [
+                    '如何重置密码？',
+                    '课程购买后如何退款？',
+                    '作业提交截止时间可以延长吗？',
+                    '如何查看学习记录？'
+                ];
+
+                const currentSessionTitle = computed(() => {
+                    const session = sessions.value.find(s => s.id === currentThreadId.value);
+                    return session?.title || '新会话';
+                });
+
+                const userAvatar = computed(() => {
+                    return user.value?.name?.charAt(0).toUpperCase() || 'U';
+                });
+
+                // AI 对用户的称呼：注册时设置的用户名优先，其次登录用户昵称
+                const greetingName = computed(() => {
+                    return cache.get(STORAGE_KEY.AI_CALL_NAME) || user.value?.name || '同学';
+                });
+
+                const canSend = computed(() => {
+                    return inputText.value.trim() && !isLoading.value;
+                });
+
+                const healthText = computed(() => {
+                    if (healthStatus.value === 'online') return '服务正常';
+                    if (healthStatus.value === 'degraded') return '服务异常';
+                    return '离线';
+                });
+
+                const loadCurrentMessages = async () => {
+                    if (!currentThreadId.value) {
+                        messages.value = [];
+                        return;
+                    }
+                    try {
+                        // 优先请求后端历史：同时完成归属校验（403 抛错），
+                        // 不能先读本地缓存——他人会话的缓存消息会直接展示，造成"会话共享"假象
+                        const history = await apiGetHistory(currentThreadId.value);
+                        messages.value = parseHistory(history);
+                        cache.setMessages(currentThreadId.value, messages.value);
+                    } catch (err) {
+                        if (err && err.status === 403) {
+                            // 会话属于其他账号：从列表移除并提示，避免残留
+                            const removed = currentThreadId.value;
+                            sessions.value = sessions.value.filter(s => s.id !== removed);
+                            cache.removeMessages(removed);
+                            saveSessions();
+                            if (sessions.value.length > 0) {
+                                currentThreadId.value = sessions.value[0].id;
+                                saveCurrentThread();
+                                await loadCurrentMessages();
+                            } else {
+                                createNewSession();
+                            }
+                            showToast('该会话不属于当前账号，已移除', 'error');
+                            return;
+                        }
+                        // 网络/服务异常：回退本地缓存兜底，保证弱网下仍可阅读
+                        const cached = cache.getMessages(currentThreadId.value);
+                        messages.value = cached && cached.length > 0 ? cached : [];
+                    }
+                };
+
+                const parseHistory = (history) => {
+                    if (!Array.isArray(history)) return [];
+                    return history.map(item => ({
+                        id: generateId(), // 唯一 key，避免数组变更时 DOM 错乱
+                        role: item.role === 'human' ? 'user' : 'assistant',
+                        content: extractContentText(item.content),
+                        time: formatTime()
+                    }));
+                };
+
+                const saveSessions = () => {
+                    cache.set(sessionCacheKey(STORAGE_KEY.SESSIONS), sessions.value);
+                };
+
+                const saveCurrentThread = () => {
+                    cache.set(sessionCacheKey(STORAGE_KEY.CURRENT_THREAD), currentThreadId.value);
+                };
+
+                const saveMessages = () => {
+                    if (currentThreadId.value) {
+                        cache.setMessages(currentThreadId.value, messages.value);
+                    }
+                };
+
+                const scrollToBottom = async () => {
+                    await nextTick();
+                    if (messagesContainer.value) {
+                        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+                    }
+                };
+
+                const autoResize = () => {
+                    const el = textarea.value;
+                    if (!el) return;
+                    el.style.height = 'auto';
+                    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+                };
+
+                const createNewSession = () => {
+                    sessions.value = sessions.value.filter(s => !s.isBlank);
+                    const id = generateId();
+                    const session = { id, title: '新会话', messages: [], isBlank: true, createdAt: Date.now() };
+                    sessions.value.unshift(session);
+                    currentThreadId.value = id;
+                    messages.value = [];
+                    saveSessions();
+                    saveCurrentThread();
+                    cache.setMessages(id, []);
+                    closeSidebar();
+                    focusInput();
+                };
+
+                const switchSession = async (id) => {
+                    if (id === currentThreadId.value) return;
+                    currentThreadId.value = id;
+                    saveCurrentThread();
+                    await loadCurrentMessages();
+                    closeSidebar();
+                    scrollToBottom();
+                };
+
+                const deleteSession = async (id) => {
+                    try {
+                        await apiDeleteSession(id);
+                    } catch (err) {
+                        showToast('删除会话失败: ' + err.message, 'error');
+                        return;
+                    }
+                    sessions.value = sessions.value.filter(s => s.id !== id);
+                    cache.removeMessages(id);
+                    saveSessions();
+                    if (currentThreadId.value === id) {
+                        if (sessions.value.length > 0) {
+                            await switchSession(sessions.value[0].id);
+                        } else {
+                            createNewSession();
+                        }
+                    }
+                };
+
+                const clearCurrentChat = () => {
+                    messages.value = [];
+                    const session = sessions.value.find(s => s.id === currentThreadId.value);
+                    if (session) {
+                        session.messages = [];
+                        session.title = '新会话';
+                        session.isBlank = true;
+                    }
+                    saveMessages();
+                    saveSessions();
+                };
+
+                const sendQuick = (text) => {
+                    inputText.value = text;
+                    sendMessage();
+                };
+
+                const sendMessage = async () => {
+                    const content = inputText.value.trim();
+                    if (!content || isLoading.value) return;
+
+                    if (!currentThreadId.value) {
+                        createNewSession();
+                    }
+
+                    const session = sessions.value.find(s => s.id === currentThreadId.value);
+
+                    const userMsg = { id: generateId(), role: 'user', content, time: formatTime() };
+                    messages.value.push(userMsg);
+
+                    if (session && session.title === '新会话') {
+                        session.title = content.length > 20 ? content.slice(0, 20) + '...' : content;
+                    }
+                    if (session) {
+                        session.isBlank = false;
+                        session.lastMessageAt = Date.now();
+                    }
+
+                    inputText.value = '';
+                    resetTextarea();
+                    saveMessages();
+                    saveSessions();
+                    scrollToBottom();
+
+                    isLoading.value = true;
+                    streaming.value = false;
+
+                    try {
+                        // 注意：push 后必须从响应式代理中取回引用。Vue 3 的 proxy 是惰性转换的，
+                        // push 进数组的是原始对象，若直接持有它并赋值 content，不会触发响应式
+                        // 更新（流式输出卡在"正在思考..."，刷新后从缓存整体赋值才显示）。
+                        messages.value.push({ id: generateId(), role: 'assistant', content: '', time: formatTime() });
+                        const aiMsg = messages.value[messages.value.length - 1];
+                        saveMessages();
+                        scrollToBottom();
+
+                        // 流式节流：避免每个 token 都做全量 v-html 重渲染 + localStorage 序列化，
+                        // 长回答下会阻塞主线程导致界面冻结/整页白屏。latestText 只保留最新文本，
+                        // 定时器触发时渲染最新值（节流而非防抖，视觉上仍是平滑逐字输出）。
+                        let latestText = '';
+                        let renderTimer = null;
+                        let saveTimer = null;
+
+                        const answer = await apiChat(content, currentThreadId.value, (text) => {
+                            streaming.value = true;
+                            latestText = text;
+                            if (!renderTimer) {
+                                renderTimer = setTimeout(() => {
+                                    renderTimer = null;
+                                    aiMsg.content = latestText;
+                                    scrollToBottom();
+                                }, 100);
+                            }
+                            if (!saveTimer) {
+                                saveTimer = setTimeout(() => {
+                                    saveTimer = null;
+                                    saveMessages();
+                                }, 500);
+                            }
+                        });
+
+                        // 流结束：清掉未触发的节流器，确保最终内容一次性落库渲染
+                        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+                        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+                        aiMsg.content = answer || '（无回复）';
+                        streaming.value = false;
+                        saveMessages();
+                        saveSessions();
+                        scrollToBottom();
+                    } catch (err) {
+                        messages.value.pop();
+                        saveMessages();
+                        if (err && err.status === 403) {
+                            // 会话被判定为他人所有：从列表移除并新建会话，不再复用该 thread
+                            const removed = currentThreadId.value;
+                            sessions.value = sessions.value.filter(s => s.id !== removed);
+                            cache.removeMessages(removed);
+                            saveSessions();
+                            createNewSession();
+                            showToast('该会话不属于当前账号，已切换新会话', 'error');
+                            return;
+                        }
+                        showToast('发送消息失败: ' + err.message, 'error');
+                    } finally {
+                        isLoading.value = false;
+                        streaming.value = false;
+                        focusInput();
+                    }
+                };
+
+                const handleKeydown = (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                };
+
+                const resetTextarea = () => {
+                    const el = textarea.value;
+                    if (el) {
+                        el.style.height = 'auto';
+                    }
+                };
+
+                const focusInput = () => {
+                    setTimeout(() => textarea.value?.focus(), 50);
+                };
+
+                const openSidebar = () => { sidebarOpen.value = true; };
+                const closeSidebar = () => { sidebarOpen.value = false; };
+
+                const logout = () => {
+                    // 会话缓存按 userId 隔离（sessionCacheKey），登出无需清理：
+                    // 同一账号重新登录后仍能恢复自己的会话列表，不同账号之间天然隔离
+                    cache.remove(STORAGE_KEY.USER);
+                    router.push('/api/login');
+                };
+
+                const checkHealth = async () => {
+                    const result = await apiHealthCheck();
+                    if (result.status === 'ok' && result.db) {
+                        healthStatus.value = 'online';
+                    } else {
+                        healthStatus.value = 'degraded';
+                    }
+                };
+
+                let healthTimer = null;
+
+                onMounted(async () => {
+                    updateLastActive();
+                    if (!currentThreadId.value || !sessions.value.find(s => s.id === currentThreadId.value)) {
+                        if (sessions.value.length > 0) {
+                            currentThreadId.value = sessions.value[0].id;
+                            saveCurrentThread();
+                        } else {
+                            createNewSession();
+                        }
+                    }
+                    await loadCurrentMessages();
+                    scrollToBottom();
+                    focusInput();
+                    checkHealth();
+                    healthTimer = setInterval(checkHealth, 30000);
+                });
+
+                onUnmounted(() => {
+                    if (healthTimer) clearInterval(healthTimer);
+                });
+
+                return {
+                    user, sessions, currentThreadId, messages, inputText,
+                    isLoading, streaming, sidebarOpen, healthStatus, healthText,
+                    messagesContainer, textarea, quickQuestions,
+                    currentSessionTitle, userAvatar, greetingName, canSend,
+                    createNewSession, switchSession, deleteSession,
+                    clearCurrentChat, sendMessage, sendQuick,
+                    handleKeydown, autoResize, openSidebar, closeSidebar,
+                    logout, escapeHtml
+                };
+            }
+        };
+
+        // ============================================================
+        // Toast 提示（全局）
+        // ============================================================
+        const toastState = Vue.reactive({ message: '', type: 'info', show: false });
+        let toastTimer = null;
+
+        function showToast(message, type = 'info') {
+            toastState.message = message;
+            toastState.type = type;
+            toastState.show = true;
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toastState.show = false;
+            }, 3000);
+        }
+
+        // ============================================================
+        // 路由与根组件
+        // ============================================================
+        const routes = [
+            {
+                path: '/api',
+                component: AuthLayout,
+                children: [
+                    { path: 'login', component: LoginForm },
+                    { path: 'register', component: RegisterForm },
+                    { path: 'recover', component: RecoverForm }
+                ]
+            },
+            { path: '/chat', component: ChatApp },
+            { path: '/', redirect: '/chat' }
+        ];
+
+        const router = createRouter({
+            history: createWebHistory(),
+            routes
+        });
+
+        router.beforeEach((to, from, next) => {
+            const isLoggedIn = !!cache.get(STORAGE_KEY.USER);
+            const isAuthRoute = to.path.startsWith('/api');
+            if (!isLoggedIn && !isAuthRoute) {
+                next('/api/login');
+            } else if (isLoggedIn && isAuthRoute) {
+                next('/chat');
+            } else {
+                next();
+            }
+        });
+
+        const App = {
+            template: `
+                <div class="app-root">
+                    <router-view v-slot="{ Component }">
+                        <!-- v-if 判空：路由解析完成前 Component 为 undefined，避免渲染异常节点 -->
+                        <component v-if="Component" :is="Component" />
+                    </router-view>
+                    <div class="toast" :class="[toast.type, { show: toast.show }]">{{ toast.message }}</div>
+                </div>
+            `,
+            setup() {
+                return { toast: toastState };
+            }
+        };
+
+            const app = createApp(App);
+            // 全局错误捕获：任何渲染/运行时错误都会提示而不是静默白屏，便于定位问题
+            app.config.errorHandler = (err, instance, info) => {
+                console.error('[Vue error]', info, err);
+                showToast('页面渲染出错: ' + (err && err.message ? err.message : err), 'error');
+            };
+            app.use(router).mount('#app');
+        })(); // end boot
+    </script>
+</body>
+</html>

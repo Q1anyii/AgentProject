@@ -1,0 +1,109 @@
+# ============================================================
+# docker-compose.yml — 米塔 AI 智能客服一键部署
+# 启动：docker-compose up -d
+# 停止：docker-compose down
+# 查看日志：docker-compose logs -f api
+# ============================================================
+
+version: "3.8"
+
+services:
+  # ==================== PostgreSQL ====================
+  # LangGraph Checkpointer（会话状态）+ Store（长期记忆）
+  postgres:
+    image: postgres:16-alpine
+    container_name: mitta-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mitta}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== MySQL ====================
+  # 用户表 userInfo（登录/注册/密码找回）
+  mysql:
+    image: mysql:8.0
+    container_name: mitta-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-Mitta}
+      MYSQL_USER: ${MYSQL_USER:-mitta}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mitta}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== Redis ====================
+  # 检索缓存 + JWT 登录态（access/refresh token）
+  redis:
+    image: redis:7-alpine
+    container_name: mitta-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== 后端 API ====================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mitta-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 数据库连接串（容器内使用服务名作为主机名）
+      POSTGRESQL_DB_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mitta}
+      MYSQL_DB_URL: mysql+pymysql://${MYSQL_USER:-mitta}:${MYSQL_PASSWORD:-mitta}@mysql:3306/${MYSQL_DATABASE:-Mitta}
+      REDIS_DB_URL: redis://redis:6379/0
+      # LLM 配置（从 .env 读取，不在此处硬编码）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
+      SILICONFLOW_BASE_URL: ${SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # 挂载 chroma_db 数据目录（持久化向量库）
+      - ./resources/chroma_db:/app/resources/chroma_db
+      # 挂载日志目录
+      - ./logs:/app/logs
+
+# ==================== 数据卷 ====================
+volumes:
+  postgres_data:
+    driver: local
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
