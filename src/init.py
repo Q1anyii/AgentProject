@@ -15,14 +15,10 @@ from pymysql.cursors import DictCursor
 load_dotenv(override=True)
 
 model = init_chat_model(
-    model=os.getenv("MODEL_NAME"),
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url=os.getenv("BASE_URL"),
-    extra_body={
-        "thinking":{
-            "type": "disabled"
-        }
-    }
+    model="deepseek-v4-flash",  # 指定混元模型，如 hunyuan-turbos-latest[reference:4]
+    model_provider="openai",  # 关键：使用 OpenAI 兼容模式
+    api_key=os.getenv("HUNYUAN_API_KEY"),  # 你的混元 API Key
+    base_url="https://tokenhub.tencentmaas.com/v1",  # 混元的 Base URL[reference:5]
 )
 
 embed_model = OpenAIEmbeddings(
@@ -93,3 +89,7 @@ class CustomPostgresSaver(PostgresSaver):
                 config = {}
             config.setdefault("configurable", {})["thread_id"] = thread_id
         return super().list(config, filter=filter, before=before, limit=limit)
+
+if __name__ =="__main__":
+    resp = model.invoke("简单介绍一下自己")
+    print(resp.content)

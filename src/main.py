@@ -8,6 +8,7 @@ from loguru import logger
 from context.user_context import CtxUser
 from schemas.request_schemas.chat_schema import ChatRequest
 from schemas.request_schemas.login_schema import *
+from service.cache_service import cache_service
 from service.chat_service import ChatService
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
@@ -30,12 +31,14 @@ async def lifespan(app: FastAPI):
     logger.info("正在初始化 LangGraph 资源...")
     chat_service.open()
     login_service.open()
+    cache_service.open()
     logger.info("资源初始化完成")
     yield                                # ===== 应用运行期间（yield 挂起）=====
     # ===== 关闭阶段：yield 之后 =====
     logger.info("正在释放资源...")
     chat_service.close(timeout=10)
     login_service.close(timeout=10)
+    cache_service.close()
     logger.info("资源已释放")
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
@@ -131,6 +134,9 @@ def login(request_body: LoginRequest):
         },
         expires_delta=timedelta(minutes=int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES)),
     )
+    r = cache_service.redis
+    key = f"user:{user_id}:token"
+    r.setex(key, JWT_ACCESS_TOKEN_EXPIRE_MINUTES, token)
     return {"ok": True, "token": token, "user_info": user_info}
 
 

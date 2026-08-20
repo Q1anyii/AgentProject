@@ -1,5 +1,6 @@
 from langchain_core.tools import tool
 from langchain_core.runnables.config import RunnableConfig
+from langgraph.graph.message import MessagesState
 
 
 @tool(description="总结对话工具，压缩当前会话上下文", parse_docstring=True)
@@ -41,3 +42,6 @@ def get_current_user(config: RunnableConfig) -> dict:
 def build_tool_graph():
     """返回全部工具列表，供主图绑定模型与 ToolNode 使用"""
     return [summarize, get_current_user]
+
+    # class OverAllState(MessagesState):
+

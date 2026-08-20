@@ -1,9 +1,14 @@
-from typing import TYPE_CHECKING, TypedDict, List, Dict, Any
+import json
+from typing import TYPE_CHECKING, TypedDict, List, Dict, Any, Optional
 from langchain_core.documents import Document
+from langchain_core.runnables.config import RunnableConfig
 from langgraph.constants import START, END
 from langgraph.graph.state import StateGraph
+from langgraph.types import Send
 from loguru import logger
 from pydantic import Field, BaseModel
+from service.cache_service import cache_service as _cache_service
+from utils.doc_util import unpack_query_results, documents_to_dicts
 
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
@@ -11,9 +16,10 @@ if TYPE_CHECKING:
 from init import model, online_rerank
 
 
-def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
+def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
     collection = self.collection  # ← 关键：闭包捕获 self.collection，retrieve 节点内继续用 collection 变量
-
+    # Redis 检索缓存：全局单例（main.py lifespan 统一 open/close），节点内直接使用，不自行管理生命周期
+    cache_service = _cache_service
 
     class RAGState(TypedDict):
         question: str
@@ -21,6 +27,7 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
         rewritten_queries: List[str]  # 改写后的查询列表
         merged_docs: List[Document]  # 多查询召回 + RRF 融合后的候选
         reranked_docs: List[Document]  # 重排后的最终文档
+        cache_hit: Optional[bool]
 
     class QueryRewriteResult(BaseModel):
         main_query: str
@@ -40,7 +47,27 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
 
     用户当前问题：
     {question}
+    
+    输出要求：只返回JSON，不要任何额外思考、说明文字。
+
     """
+
+    def check_cache(state: RAGState, config: RunnableConfig) -> dict:
+        question = state["question"]
+        thread_id = config["configurable"].get("thread_id", None)
+        query_in_cache = cache_service.query_cache(thread_id, question, 3)
+        if query_in_cache:
+            logger.info("缓存命中，直接返回")
+            return {"reranked_docs": query_in_cache, "cache_hit": True}
+        return {"cache_hit": False}
+
+    def store_cache(state: RAGState, config: RunnableConfig) -> dict:
+        thread_id = config["configurable"].get("thread_id", None)
+        if not state.get("cache_hit"):
+            # ttl 走 CacheService.store_cache 默认值（15s）；不要对 user_id 调 redis TTL——
+            # TTL 只能查已存在 key 的剩余时间，user_id 不是 key，返回 -2 会导致 expire 异常
+            cache_service.store_cache(thread_id, state["question"], state["reranked_docs"])
+        return {}
 
     def rewrite_query(state: RAGState) -> dict:
         history_text = "\n".join(
@@ -53,7 +80,9 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
         )
         logger.info("正在进行Query 改写 + 重排序")
 
-        result = model.with_structured_output(QueryRewriteResult).invoke(prompt)
+        resp = model.invoke(prompt, response_format={"type": "json_object"})
+        raw_json = json.loads(resp.content)
+        result = QueryRewriteResult(**raw_json)
 
         queries = [result.main_query] + result.sub_queries
         logger.info(f"重写后问题:{queries}")
@@ -79,50 +108,6 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
                 reverse=True,
             )
         ]
-
-    def unpack_query_results(results: List[Any]) -> List[List[Document]]:
-        """
-        将 List[QueryResult] 拆解为 List[List[Document]]，
-        每个内层列表对应一个查询的文档列表。
-        """
-        all_query_docs = []
-
-        for result in results:
-            # 防御：某些版本/配置下 ChromaDB 会再包一层 list，先解包
-            while isinstance(result, list) and len(result) == 1:
-                result = result[0]
-
-            if not isinstance(result, dict):
-                logger.warning(
-                    f"Unexpected query result type: {type(result)}, value: {result[:200] if isinstance(result, (list, str)) else result}")
-                all_query_docs.append([])
-                continue
-
-            ids = result.get("ids", [])
-            documents = result.get("documents", [])
-            metadatas = result.get("metadatas", [])
-
-            # ChromaDB 返回的是 batch 嵌套结构：List[List[...]]
-            if ids and isinstance(ids[0], list):
-                for sub_ids, sub_docs, sub_metas in zip(ids, documents, metadatas):
-                    query_docs = []
-                    for i, doc_id in enumerate(sub_ids):
-                        meta = dict(sub_metas[i]) if i < len(sub_metas) else {}
-                        meta["id"] = doc_id
-                        text = sub_docs[i] if i < len(sub_docs) else ""
-                        query_docs.append(Document(page_content=text, metadata=meta))
-                    all_query_docs.append(query_docs)
-            else:
-                # 兜底：一维结构
-                query_docs = []
-                for i, doc_id in enumerate(ids):
-                    meta = dict(metadatas[i]) if i < len(metadatas) else {}
-                    meta["id"] = doc_id
-                    text = documents[i] if i < len(documents) else ""
-                    query_docs.append(Document(page_content=text, metadata=meta))
-                all_query_docs.append(query_docs)
-
-        return all_query_docs
 
     def retrieve(state: RAGState) -> dict:
         TOP_K = 5
@@ -190,14 +175,25 @@ def build_rerank_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻�
 
     builder = StateGraph(RAGState)
 
+    builder.add_node("check_cache", check_cache)
+    builder.add_node("store_cache", store_cache)
     builder.add_node("rewrite", rewrite_query)
     builder.add_node("retrieve", retrieve)
     builder.add_node("rerank", rerank)
 
-    builder.add_edge(START, "rewrite")
+    builder.add_edge(START, "check_cache")
+    builder.add_conditional_edges(
+        "check_cache",
+        lambda state: "hit" if state.get("cache_hit") else "miss",
+        {
+            "hit": END,
+            "miss": "rewrite",
+        },
+    )
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("retrieve", "rerank")
-    builder.add_edge("rerank", END)
+    builder.add_edge("rerank", "store_cache")
+    builder.add_edge("store_cache", END)
 
     rerank_graph = builder.compile()
     return rerank_graph

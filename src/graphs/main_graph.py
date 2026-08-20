@@ -15,14 +15,16 @@ from pydantic import Field
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
     from service.chat_service import ChatService
-from graphs.rerank_graph import build_rerank_graph
+from graphs.retrieve_graph import build_retrieve_graph
 from graphs.tool_graph import build_tool_graph
 from init import model, system_prompt
 
 
 def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
 
-    rerank_graph = build_rerank_graph(self=self)
+    # 复用 ChatService.open() 已构建的 retrieve_graph（闭包已捕获 self.collection，
+    # Redis 缓存用全局单例 cache_service），避免重复 build 产生双份图对象；兜底：独立调用时仍可自行构建
+    retrieve_graph = self.retrieve_graph or build_retrieve_graph(self=self)
 
     # 工具：LLM 需要时可调用（用户信息/会话总结），工具通过请求级上下文读取数据
     tools = build_tool_graph()
@@ -44,7 +46,7 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             if m.type in ("human", "ai")
         ]
 
-        retrieve_res = rerank_graph.invoke({
+        retrieve_res = retrieve_graph.invoke({
             "question": input_str,
             "history": history,
         }

@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from loguru import logger
 from graphs.main_graph import build_main_graph
-from graphs.rerank_graph import build_rerank_graph
+from graphs.retrieve_graph import build_retrieve_graph
 from init import COLLECTION_NAME, CustomPostgresSaver
 
 """
@@ -42,7 +42,6 @@ class ChatService:
     POSTGRESQL_DB_URL = os.getenv("POSTGRESQL_DB_URL")
     persist_path: str | Path
     db_url: str
-
 
     def __init__(self, persist_path="../recourses/chroma_db", db_url=None):
         self.persist_path = persist_path
@@ -80,7 +79,7 @@ class ChatService:
         self.checkpointer.setup()
         self.store.setup()
         self.cache = InMemoryCache()  # ← self.，且 compile 用它
-        self.rerank_graph = build_rerank_graph(self)  # 只 build 一次，替代 @lru_cache
+        self.retrieve_graph = build_retrieve_graph(self)  # 只 build 一次，替代 @lru_cache
         self.main_graph = build_main_graph(self)
 
     def close(self, timeout:int =10):
