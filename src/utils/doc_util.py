@@ -54,3 +54,14 @@ def documents_to_dicts(docs: List[Document]) -> List[Dict[str, Any]]:
         }
         for doc in docs
     ]
+
+def dict_to_documents(dictionary: list[Dict[Any, Any]]) -> List[Document]:
+    try:
+        doc_list = [
+            Document(page_content=item["page_content"], metadata=item["metadata"])
+            for item in dictionary
+        ]
+        return doc_list
+    except (AttributeError, KeyError, TypeError) as e:
+        logger.warning(f"缓存文档反序列化失败：{dictionary}，错误：{e}")
+        return []

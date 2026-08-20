@@ -16,3 +16,7 @@ INDEX_NAME = "idx:retrieve_cache"
 KEY_PREFIX = "retrieve_cache:"
 
 CACHE_DEFAULT_TTL = 900
+
+# 缓存命中验证阈值：向量初筛召回候选后，用 bge-reranker-v2-m3 验证候选问题与当前问题
+# 是否语义等价（实测同义改写 0.89+，无关问题 0.0，取 0.5 有充足间隔）
+CACHE_RERANK_HIT_SCORE = 0.5

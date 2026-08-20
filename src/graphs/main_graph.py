@@ -1,4 +1,4 @@
-from typing import Annotated, Optional, TYPE_CHECKING
+from typing import Annotated, Optional, TYPE_CHECKING, Any
 
 from langgraph.types import CachePolicy, Send
 from langgraph.store.base import BaseStore
@@ -11,6 +11,7 @@ from langgraph.graph.state import StateGraph
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 from pydantic import Field
+from rich import print as rprint
 
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 from graphs.retrieve_graph import build_retrieve_graph
 from graphs.tool_graph import build_tool_graph
 from init import model, system_prompt
+from utils.doc_util import documents_to_dicts
 
 
 def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
@@ -33,7 +35,7 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
 
     class OverAllState(MessagesState):
         input_str: Annotated[str, Field(description="用户输入")]
-        retrieve_res: Annotated[Optional[QueryResult], "检索结果"] = None
+        retrieve_res: Annotated[Optional[list[Any] | dict[str, Any] | Any], "检索结果"] = None
         needs_retrieval: Annotated[bool, Field(description="是否需要检索知识库")] = False
 
     def retrieve_node(state: OverAllState) -> OverAllState:
@@ -49,8 +51,14 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         retrieve_res = retrieve_graph.invoke({
             "question": input_str,
             "history": history,
-        }
-        )
+        })
+
+        # Document 无法被 checkpointer 正确反序列化：恢复会话时会被还原成 dict，
+        # 导致 llm_node 里 doc.page_content 报 AttributeError。
+        # 统一在入 state 前转成 dict，llm_node 侧兼容两种形态读取。
+        output = retrieve_res.get("output", [])
+        if output and hasattr(output[0], "page_content"):
+            retrieve_res["output"] = documents_to_dicts(output)
 
         return {
             "retrieve_res": retrieve_res
@@ -60,9 +68,15 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         input_str = state["input_str"]
         retrieval_res = state.get("retrieve_res")
 
-        if retrieval_res is not None:
-            # 检索分支：在线重排结果已按相关性降序，直接取文档文本
-            docs = [d.page_content for d in retrieval_res.get("reranked_docs", [])]
+
+        if retrieval_res and "output" in retrieval_res:
+            # 检索分支：在线重排结果已按相关性降序，直接取文档文本。
+            # 兼容 Document 对象与 dict 两种形态（checkpoint 恢复/旧缓存里是 dict）
+            raw_docs = retrieval_res.get("output", [])
+            docs = [
+                doc.page_content if hasattr(doc, "page_content") else doc.get("page_content", "")
+                for doc in raw_docs
+            ]
             if docs:
                 context = "\n\n".join(f"[文档 {i + 1}] {doc}" for i, doc in enumerate(docs[:5]))
             else:

@@ -6,10 +6,10 @@ from langgraph.constants import START, END
 from langgraph.graph.state import StateGraph
 from langgraph.types import Send
 from loguru import logger
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, ConfigDict
 from service.cache_service import cache_service as _cache_service
 from utils.doc_util import unpack_query_results, documents_to_dicts
-
+import json, re
 if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
     from service.chat_service import ChatService
@@ -21,6 +21,10 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
     # Redis 检索缓存：全局单例（main.py lifespan 统一 open/close），节点内直接使用，不自行管理生命周期
     cache_service = _cache_service
 
+    class OutputState(TypedDict):
+        output: List[Document]
+
+
     class RAGState(TypedDict):
         question: str
         history: List[Dict[str, str]]  # 多轮对话历史，只用于 query 改写
@@ -30,9 +34,11 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
         cache_hit: Optional[bool]
 
     class QueryRewriteResult(BaseModel):
-        main_query: str
-        sub_queries: List[str] = Field(default_factory=list)
-        keywords: List[str] = Field(default_factory=list)
+        model_config = ConfigDict(populate_by_name=True)  # 关键配置
+
+        main_query: str = Field(..., alias="主查询")
+        sub_queries: List[str] = Field(default_factory=list, alias="子查询")
+        keywords: List[str] = Field(default_factory=list, alias="关键词")
 
     REWRITE_PROMPT = """你是查询改写专家。根据对话历史，将用户问题改写成适合向量检索的独立查询。
 
@@ -51,6 +57,19 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
     输出要求：只返回JSON，不要任何额外思考、说明文字。
 
     """
+
+    def extract_json(text: str) -> dict:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if match:
+                return json.loads(match.group(1))
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1:
+                return json.loads(text[start:end + 1])
+            raise
 
     def check_cache(state: RAGState, config: RunnableConfig) -> dict:
         question = state["question"]
@@ -81,7 +100,7 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
         logger.info("正在进行Query 改写 + 重排序")
 
         resp = model.invoke(prompt, response_format={"type": "json_object"})
-        raw_json = json.loads(resp.content)
+        raw_json = extract_json(resp.content)
         result = QueryRewriteResult(**raw_json)
 
         queries = [result.main_query] + result.sub_queries
@@ -173,27 +192,32 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
 
         return {"reranked_docs": top_docs}
 
-    builder = StateGraph(RAGState)
+    def output_node(state: RAGState) -> dict:
+        return {"output": state["reranked_docs"]}
+
+    builder = StateGraph(state_schema=RAGState, output_schema=OutputState)
 
     builder.add_node("check_cache", check_cache)
     builder.add_node("store_cache", store_cache)
     builder.add_node("rewrite", rewrite_query)
     builder.add_node("retrieve", retrieve)
     builder.add_node("rerank", rerank)
+    builder.add_node("output_node", output_node)
 
     builder.add_edge(START, "check_cache")
     builder.add_conditional_edges(
         "check_cache",
         lambda state: "hit" if state.get("cache_hit") else "miss",
         {
-            "hit": END,
+            "hit": "output_node",
             "miss": "rewrite",
         },
     )
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "store_cache")
-    builder.add_edge("store_cache", END)
+    builder.add_edge("rerank", "output_node")
+    builder.add_edge("output_node", END)
 
     rerank_graph = builder.compile()
     return rerank_graph

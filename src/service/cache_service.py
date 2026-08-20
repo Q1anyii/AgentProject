@@ -8,21 +8,23 @@ from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.field import TextField, NumericField, TagField, VectorField
 import numpy as np
 import redis
-from init import embed_model
+from init import embed_model, online_rerank
 import json
 import time
 import uuid
 from loguru import logger
 from constant.cache_constant import REDIS_INIT_SUCCESS, REDIS_CONNECT_FAILED, REDIS_CONNECT_CLOSED, \
     HEALTH_CHECK_INTERVAL, \
-    TAG_FIELD, VECTOR_FIELD_NAME, VECTOR_FIELD_ALGORITHM, VECTOR_ATTRIBUTE, INDEX_NAME, KEY_PREFIX, CACHE_DEFAULT_TTL
+    TAG_FIELD, VECTOR_FIELD_NAME, VECTOR_FIELD_ALGORITHM, VECTOR_ATTRIBUTE, INDEX_NAME, KEY_PREFIX, CACHE_DEFAULT_TTL, \
+    CACHE_RERANK_HIT_SCORE
 from redis.commands.search.query import Query
 
-from utils.doc_util import documents_to_dicts
+from utils.doc_util import documents_to_dicts, dict_to_documents
 from utils.lsh_util import RandomProjectionLSH
 
 load_dotenv(override=True)
 REDIS_DB_URL = os.getenv("REDIS_DB_URL")
+
 
 class CacheService:
     db_url: str
@@ -122,7 +124,7 @@ class CacheService:
         logger.info(f"{key}已存储")
         self.redis.expire(key, self.cache_ttl)
 
-    def query_cache(self, thread_id: str, query: str, top_k: int = 1) -> dict | None:
+    def query_cache(self, thread_id: str, query: str, top_k: int = 3) -> List[Document] | None:
         query_vector = self.query_to_vector(query)
         # 将向量转为二进制
         query_bytes = np.array(query_vector, dtype=np.float32).tobytes()
@@ -139,22 +141,32 @@ class CacheService:
         params = {"vec": query_bytes}
         res = self.redis.ft(self.index_name).search(q, query_params=params)
 
-        if res.docs:
-            key = self.set_key(thread_id, query_vector)
-            self.redis.expire(key, self.cache_ttl)  # 滑动过期
-            doc = res.docs[0]
-            distance = float(doc.vector_score)  # 距离值
+        if not res.docs:
+            return None
 
-            # 判断是否命中（阈值需根据度量调整）
-            # COSINE 距离：0 表示完全相同；0.25 约等价相似度 0.75，
-            # 同义改写（如“如何重置密码”→“怎么重置密码”）实测约 0.2，阈值 0.1 会永远 miss
-            threshold = 0.25
-            if distance <= threshold:
-                cached_result = json.loads(doc.result)
-                return cached_result
-            else:
-                print(f"未命中，距离 {distance} 超过阈值 {threshold}")
-                return None
+        # 向量初筛只做候选召回，不做命中判定：实测 bge-m3 原始 query 向量对短问题的
+        # 语义区分度很差（同义改写距离 0.6+，比无关问题还远），绝对距离阈值不可靠，
+        # 必须再用重排模型验证候选问题与当前问题是否语义等价，才允许命中缓存
+        candidate_texts = [doc.query_text for doc in res.docs]
+        try:
+            results = online_rerank(query, candidate_texts, top_n=len(candidate_texts))
+        except Exception as e:
+            # 缓存是优化而非正确性依赖：验证服务不可用时按未命中降级，不阻塞主流程
+            logger.warning(f"缓存验证重排调用失败，按未命中处理：{e}")
+            return None
+        if not results:
+            logger.warning("缓存验证重排返回空结果，按未命中处理")
+            return None
+
+        best = results[0]
+        if best["relevance_score"] >= CACHE_RERANK_HIT_SCORE:
+            hit = res.docs[best["index"]]
+            # 滑动过期：给真实命中的条目续期（hit.id 才是该条目的 Redis key，
+            # 按查询向量 set_key 算出的桶 key 未必存在）
+            self.redis.expire(hit.id, self.cache_ttl)
+            return dict_to_documents(json.loads(hit.result))
+
+        logger.error(f"未命中，重排最高分 {best['relevance_score']} 低于阈值 {CACHE_RERANK_HIT_SCORE}")
         return None
 
 
