@@ -64,6 +64,41 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             "retrieve_res": retrieve_res
         }
 
+    def _get_username(config: RunnableConfig) -> str | None:
+        """取当前用户 username：优先用鉴权解析结果（chat 路由已从 JWT 解析），
+        invoke 等无 user_info 的路径回退到 Redis 登录态 token 解析。"""
+        user_info = config["configurable"].get("user_info")
+        if user_info is not None:
+            username = getattr(user_info, "username", None)
+            if username:
+                return username
+        user_id = config["configurable"].get("user_id", "default")
+        from constant.cache_constant import USER_TOKEN_KEY
+        from service.cache_service import cache_service
+        from utils.jwt_utils import get_username_from_token
+        try:
+            token = cache_service.redis.get(USER_TOKEN_KEY.format(user_id=user_id))
+        except Exception as e:
+            logger.warning(f"读取登录态 token 失败，跳过用户名解析：{e}")
+            return None
+        return get_username_from_token(token) if token else None
+
+    def _ensure_username_profile(store: BaseStore, user_id: str, username: str | None) -> str:
+        """把 username 并入长期记忆档案并立即落库（回答前完成），返回合并后档案。
+
+        username 属长期事实，先写入再组装提示词，AI 首轮就能识别用户；
+        档案按 (rag_chat, user_id) 命名空间隔离，各用户独立存储。
+        """
+        namespace = ("rag_chat", user_id)
+        item = store.get(namespace, "user_profile")
+        profile = item.value["profile"] if item else "（暂无档案）"
+        base_profile = f"用户名：{username}" if username else ""
+        if base_profile and base_profile not in profile:
+            profile = f"{profile}\n{base_profile}" if profile != "（暂无档案）" else base_profile
+            store.put(namespace, "user_profile", {"profile": profile})
+            logger.info(f"用户名基础档案已落库（user_id={user_id}）")
+        return profile
+
     def llm_node(state: OverAllState, config: RunnableConfig, store: BaseStore) -> OverAllState:
         input_str = state["input_str"]
         retrieval_res = state.get("retrieve_res")
@@ -90,19 +125,18 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             # 无需检索分支：直接回答
             user_content = input_str
 
-        # 长期记忆：从 store 读取该用户的档案（跨会话保存）
+        # 长期记忆：先把 username 并入档案并立即落库，再读取组装提示词（回答前完成）。
+        # 若等回答完 memory_node 才写入，首轮 AI 会先回答不认识、记忆随后才落库
         user_id = config["configurable"].get("user_id", "default")
-        long_term = ""
-        item = store.get(("rag_chat", user_id), "user_profile")
-        if item and item.value.get("profile"):
-            long_term = item.value["profile"]
+        username = _get_username(config)
+        long_term = _ensure_username_profile(store, user_id, username)
 
         # 短期记忆：checkpointer 按 thread_id 恢复的历史对话
         history = state.get("messages", [])
 
         # 组装消息：系统提示（含长期记忆）+ 历史对话 + 检索资料与当前问题
         system_content = system_prompt
-        if long_term:
+        if long_term and long_term != "（暂无档案）":
             system_content += f"\n\n【用户长期记忆】\n{long_term}"
 
         messages = [SystemMessage(content=system_content)] + list(history)
@@ -150,21 +184,8 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         original_profile = item.value["profile"] if item else "（暂无档案）"
         old_profile = original_profile
 
-        # 自动持久化用户名：通过 Redis key 访问登录态 token，再调用 jwt_utils 解析出 username；
-        # 用户名属长期事实，先并入已有档案，避免被 LLM 提取环节丢弃（首次对话即可落库）
-        from constant.cache_constant import USER_TOKEN_KEY
-        from service.cache_service import cache_service
-        from utils.jwt_utils import get_username_from_token
-        try:
-            token = cache_service.redis.get(USER_TOKEN_KEY.format(user_id=user_id))
-        except Exception as e:
-            # 记忆写入是收尾优化：Redis 不可用时降级为不写入用户名，不阻塞主流程
-            logger.warning(f"读取登录态 token 失败，跳过用户名持久化：{e}")
-            token = None
-        username = get_username_from_token(token) if token else None
-        base_profile = f"用户名：{username}" if username else ""
-        if base_profile and base_profile not in old_profile:
-            old_profile = f"{old_profile}\n{base_profile}" if old_profile != "（暂无档案）" else base_profile
+        # 用户名基础档案已由 llm_node 在组装提示词前写入（首轮对话即落库），
+        # 这里只负责增量提取与防丢失兜底，不再重复解析 Redis token
 
         # 用 LLM 提取/合并长期记忆（AI 回答已由 add_messages 合并为完整消息）
         ai_reply = state["messages"][-1].content
@@ -176,12 +197,14 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             ))]
         )
         new_profile = response.content.strip()
-        # 本轮无新信息时（LLM 返回占位符），至少把含用户名的基础档案持久化
+        # 本轮无新信息时（LLM 返回占位符），至少把已有档案持久化
         if new_profile in NO_INFO_MARKS:
             new_profile = old_profile
-        # 兜底：LLM 合并结果若丢失了用户名，重新补回
-        if base_profile and base_profile not in new_profile:
-            new_profile = f"{new_profile}\n{base_profile}"
+        # 兜底：LLM 合并结果若丢失了"用户名"行，从原档案补回（llm_node 已保证原档案含该行）
+        import re
+        m = re.search(r"^用户名：.+$", original_profile, re.MULTILINE)
+        if m and m.group(0) not in new_profile:
+            new_profile = f"{new_profile}\n{m.group(0)}"
         # 与「合并前」档案比较：首次对话（无档案→含用户名）也会触发写入
         if new_profile and new_profile != original_profile:
             store.put(namespace, "user_profile", {"profile": new_profile})
