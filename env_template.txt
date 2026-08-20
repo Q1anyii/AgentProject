@@ -37,4 +37,8 @@ MYSQL_DB_URL=mysql+pymysql://root:1234@127.0.0.1:3306/mitta
 
 JWT_SECRET_KEY=**************************
 JWT_ALGORITHM=HS256
+# access token 有效期（分钟）：建议 30~1440，越短越安全（过期后由后端自动续签）
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=14400
+# 隐式 refresh token 有效期（天）：仅存 Redis 不下发前端，access 过期时后端自动续签；
+# 必须大于 access 有效期，否则续签会失败
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=30

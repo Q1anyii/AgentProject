@@ -15,6 +15,10 @@ VECTOR_ATTRIBUTE = {
 INDEX_NAME = "idx:retrieve_cache"
 KEY_PREFIX = "retrieve_cache:"
 
+# 登录态 token 的 Redis key 模板（main.py 签发 / jwt_utils 校验共用，避免两处格式漂移）
+USER_TOKEN_KEY = "user:{user_id}:token"
+USER_REFRESH_TOKEN_KEY = "user:{user_id}:refresh_token"
+
 CACHE_DEFAULT_TTL = 900
 
 # 缓存命中验证阈值：向量初筛召回候选后，用 bge-reranker-v2-m3 验证候选问题与当前问题

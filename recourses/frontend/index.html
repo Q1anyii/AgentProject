@@ -1346,6 +1346,18 @@
             return extra;
         }
 
+        // 隐式续签：access token 过期时后端自动用 refresh（仅存 Redis）换新 token，
+        // 通过响应头 X-New-Access-Token 回传，这里同步本地登录态，前端全程无感知
+        function syncTokenFromHeaders(headers) {
+            const newToken = headers.get('x-new-access-token');
+            if (!newToken) return;
+            const user = cache.get(STORAGE_KEY.USER, null);
+            if (user) {
+                user.token = newToken;
+                cache.set(STORAGE_KEY.USER, user);
+            }
+        }
+
         // 统一处理 401：token 缺失/过期，清除登录态并回到登录页
         function handleAuthError(response) {
             if (response.status === 401) {
@@ -1363,6 +1375,7 @@
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ query, thread_id: threadId })
             });
+            syncTokenFromHeaders(response.headers);
             handleAuthError(response);
             if (response.status === 403) {
                 // 会话归属校验：会话属于其他账号
@@ -1415,6 +1428,7 @@
             const response = await fetch(`${API_BASE}/api/chat/${threadId}/history`, {
                 headers: authHeaders()
             });
+            syncTokenFromHeaders(response.headers);
             handleAuthError(response);
             if (response.status === 403) {
                 // 会话归属校验：会话属于其他账号
@@ -1432,6 +1446,7 @@
                 method: 'DELETE',
                 headers: authHeaders()
             });
+            syncTokenFromHeaders(response.headers);
             handleAuthError(response);
             if (response.status === 403) {
                 // 会话归属校验：会话属于其他账号

@@ -6,6 +6,7 @@ from pathlib import Path
 from loguru import logger
 
 from context.user_context import CtxUser
+from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
 from schemas.request_schemas.chat_schema import ChatRequest
 from schemas.request_schemas.login_schema import *
 from service.cache_service import cache_service
@@ -17,7 +18,8 @@ from dotenv import load_dotenv
 
 from service.login_service import LoginService
 from temp.response_temp import Response
-from utils.jwt_utils import get_current_user, create_access_token, TokenData
+from utils.jwt_utils import get_current_user, create_access_token, create_refresh_token, TokenData, \
+    REFRESH_TOKEN_EXPIRE_DAYS
 
 load_dotenv()
 
@@ -60,14 +62,14 @@ def chat(request_body: ChatRequest, current_user: TokenData = Depends(get_curren
     owner = chat_service.get_thread_user_id(thread_id)
     if owner and owner != str(current_user.user_id) and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="无权使用该会话")
-    # 认证在路由层完成：JWT 解析出 user_id 后查库，构造请求级用户上下文（供图内工具读取）
+    # 认证在路由层完成：JWT 解析出 user_id/username 后查库，构造请求级用户上下文（供图内工具读取）
     user_row = login_service.get_user_by_id(str(current_user.user_id))
     user_info = (
         CtxUser(
             uid=user_row["id"],
             user_id=user_row["user_id"],
             password=None,  # 敏感字段不注入，工具无法访问
-            username=user_row["username"],
+            username=current_user.username,  # 直接取 JWT 解析出的 username（token → 解析 → 上下文）
             create_time=user_row["create_time"],
             update_time=user_row["update_time"],
         )
@@ -118,7 +120,6 @@ def check_db_health():
 
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
 
-
 @app.post("/api/login")
 def login(request_body: LoginRequest):
     user_id = request_body.userId
@@ -129,14 +130,23 @@ def login(request_body: LoginRequest):
         return Response.failed(user_info or "用户 ID 或密码错误")
     token = create_access_token(
         data={
-            "sub": str(user_info["user_id"]),
+            "sub": str(user_info["user_id"] + ":" + user_info["username"]),
             "role": user_info.get("role", "学员"),  # 管理员角色用于资源越权放行
         },
         expires_delta=timedelta(minutes=int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES)),
     )
+    # 隐式 refresh token：只存 Redis 不下发前端，access 过期时由后端（jwt_utils）自动续签
+    refresh_token = create_refresh_token(
+        data={"sub": str(user_info["user_id"] + ":" + user_info["username"])}
+    )
     r = cache_service.redis
-    key = f"user:{user_id}:token"
-    r.setex(key, JWT_ACCESS_TOKEN_EXPIRE_MINUTES, token)
+    # setex 第二参数单位是「秒」：access 配置为分钟需 ×60
+    r.setex(USER_TOKEN_KEY.format(user_id=user_id), int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60, token)
+    r.setex(
+        USER_REFRESH_TOKEN_KEY.format(user_id=user_id),
+        REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        refresh_token,
+    )
     return {"ok": True, "token": token, "user_info": user_info}
 
 

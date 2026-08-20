@@ -147,7 +147,24 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
 
         # 读取已有档案
         item = store.get(namespace, "user_profile")
-        old_profile = item.value["profile"] if item else "（暂无档案）"
+        original_profile = item.value["profile"] if item else "（暂无档案）"
+        old_profile = original_profile
+
+        # 自动持久化用户名：通过 Redis key 访问登录态 token，再调用 jwt_utils 解析出 username；
+        # 用户名属长期事实，先并入已有档案，避免被 LLM 提取环节丢弃（首次对话即可落库）
+        from constant.cache_constant import USER_TOKEN_KEY
+        from service.cache_service import cache_service
+        from utils.jwt_utils import get_username_from_token
+        try:
+            token = cache_service.redis.get(USER_TOKEN_KEY.format(user_id=user_id))
+        except Exception as e:
+            # 记忆写入是收尾优化：Redis 不可用时降级为不写入用户名，不阻塞主流程
+            logger.warning(f"读取登录态 token 失败，跳过用户名持久化：{e}")
+            token = None
+        username = get_username_from_token(token) if token else None
+        base_profile = f"用户名：{username}" if username else ""
+        if base_profile and base_profile not in old_profile:
+            old_profile = f"{old_profile}\n{base_profile}" if old_profile != "（暂无档案）" else base_profile
 
         # 用 LLM 提取/合并长期记忆（AI 回答已由 add_messages 合并为完整消息）
         ai_reply = state["messages"][-1].content
@@ -159,7 +176,14 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
             ))]
         )
         new_profile = response.content.strip()
-        if new_profile and new_profile not in NO_INFO_MARKS and new_profile != old_profile:
+        # 本轮无新信息时（LLM 返回占位符），至少把含用户名的基础档案持久化
+        if new_profile in NO_INFO_MARKS:
+            new_profile = old_profile
+        # 兜底：LLM 合并结果若丢失了用户名，重新补回
+        if base_profile and base_profile not in new_profile:
+            new_profile = f"{new_profile}\n{base_profile}"
+        # 与「合并前」档案比较：首次对话（无档案→含用户名）也会触发写入
+        if new_profile and new_profile != original_profile:
             store.put(namespace, "user_profile", {"profile": new_profile})
             logger.info(f"长期记忆已更新（user_id={user_id}）：{new_profile[:100]}")
 
