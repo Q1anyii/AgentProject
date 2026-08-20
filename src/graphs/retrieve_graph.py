@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
     from service.chat_service import ChatService
 from init import model, online_rerank
+from constant.retrieval_constants import TOP_K, DISTANCE_THRESHOLD, REWRITE_PROMPT, RRF_K
 
 
 def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
@@ -39,24 +40,6 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
         main_query: str = Field(..., alias="主查询")
         sub_queries: List[str] = Field(default_factory=list, alias="子查询")
         keywords: List[str] = Field(default_factory=list, alias="关键词")
-
-    REWRITE_PROMPT = """你是查询改写专家。根据对话历史，将用户问题改写成适合向量检索的独立查询。
-
-    要求：
-    1. 解决指代，如“他/它/这个/那个”必须替换成明确实体；
-    2. 多义词根据上下文补全限定词；
-    3. 生成 1 个主查询 + 2~3 个子查询，覆盖不同语义角度；
-    4. 再提取 3~5 个关键词。
-
-    对话历史：
-    {history}
-
-    用户当前问题：
-    {question}
-    
-    输出要求：只返回JSON，不要任何额外思考、说明文字。
-
-    """
 
     def extract_json(text: str) -> dict:
         try:
@@ -109,7 +92,7 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
 
     from concurrent.futures import ThreadPoolExecutor
 
-    def rrf_fusion(results: List[List[Document]], k: int = 60) -> List[Document]:
+    def rrf_fusion(results: List[List[Document]], k: int = RRF_K) -> List[Document]:
         scores = {}
 
         for docs in results:
@@ -129,13 +112,10 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
         ]
 
     def retrieve(state: RAGState) -> dict:
-        TOP_K = 5
-        DISTANCE_THRESHOLD = 0.3  # cosine distance阈值，小于则保留
-        # score阈值等价: SCORE_THRESHOLD = 1 - DISTANCE_THRESHOLD =0.7
-
+        # TOP_K 和 DISTANCE_THRESHOLD 已移至 constant/retrieval_constants.py 统一管理
         queries = state["rewritten_queries"]
 
-        with ThreadPoolExecutor(max_workers=len(queries)) as ex:
+        with ThreadPoolExecutor(max_workers=min(len(queries), 4)) as ex:
             raw_chroma_results = list(
                 ex.map(
                     lambda q: collection.query(query_texts=[q], n_results=TOP_K),

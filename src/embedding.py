@@ -10,6 +10,7 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from loguru import logger
 import hashlib
+from constant.embedding_constants import COLLECTION_NAME, CHUNK_SIZE, CHUNK_OVERLAP
 
 class Meta:
     """文档元数据：来源（source）与分类（category）。"""
@@ -57,13 +58,11 @@ class EmbeddingProcessor:
 
     提供同步（embed）与异步（aembed）两套入口：
     协程内部用 asyncio.to_thread 托管阻塞调用，避免卡住事件循环。
+
+    常量（COLLECTION_NAME/CHUNK_SIZE/CHUNK_OVERLAP）已移至 constant/embedding_constants.py 统一管理。
     """
 
-    COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
-    CHUNK_SIZE = 300
-    CHUNK_OVERLAP = 50
-
-    def __init__(self, persist_path: str | Path = "../recourses/chroma_db"):
+    def __init__(self, persist_path: str | Path = "../resources/chroma_db"):
         # 延迟导入：init.py 会初始化模型等重资源
         from init import embedding_function
 

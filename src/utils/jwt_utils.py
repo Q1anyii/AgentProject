@@ -16,7 +16,8 @@ load_dotenv()
 # ---------------------- JWT配置 ----------------------
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 120))
+# 修复：默认值统一为 15 分钟（与 .env.example 一致），原默认 120 分钟过长
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 15))
 # 隐式 refresh token 有效期（天）：只存 Redis 不下发前端，access 过期时由后端自动续签
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", 30))
 

@@ -54,7 +54,7 @@ class ChatService:
     db_url: str
 
 
-    def __init__(self, persist_path="../recourses/chroma_db", db_url=None):
+    def __init__(self, persist_path="../resources/chroma_db", db_url=None):
         self.persist_path = persist_path
         self.db_url = db_url or os.getenv("POSTGRESQL_DB_URL")
         # 资源占位，open() 里真正创建，close() 里释放

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from config import validate_config, get_env_int
 from context.user_context import CtxUser
 from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
 from schemas.request_schemas.chat_schema import ChatRequest
@@ -14,22 +15,30 @@ from service.chat_service import ChatService
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 
-from dotenv import load_dotenv
-
 from service.login_service import LoginService
-from temp.response_temp import Response
+from utils.response_util import Response
 from utils.jwt_utils import get_current_user, create_access_token, create_refresh_token, TokenData, \
     REFRESH_TOKEN_EXPIRE_DAYS
 
-load_dotenv()
+# 注意：.env 加载由 config.py 统一处理，无需重复 load_dotenv()
 
 chat_service = ChatService()
 login_service = LoginService()
+
+"""
+
+添加多模态功能，可读取用户上传的文件并自动解析成文档，细化拆分graph，完善tool_graph
+
+"""
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     # ===== 启动阶段：yield 之前 =====
+    # 第一步：校验必填环境变量，缺失时直接报错（快速失败，不拖到首个请求才 500）
+    validate_config()
+
     logger.info("正在初始化 LangGraph 资源...")
     chat_service.open()
     login_service.open()
@@ -44,6 +53,46 @@ async def lifespan(app: FastAPI):
     logger.info("资源已释放")
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
+
+# 注册请求限流中间件（对 /api/chat/ 等消耗 LLM 配额的接口限流）
+from middleware.rate_limit_middleware import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
+
+# ============================================================
+# 全局异常处理：统一返回结构化错误，避免暴露堆栈信息
+# ============================================================
+from fastapi import Request
+from fastapi.responses import JSONResponse as FastAPIJSONResponse
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常捕获：所有未处理的异常统一返回 500 + 结构化错误。
+
+    - 记录完整异常信息到日志（含堆栈），便于排查
+    - 返回给客户端的信息不包含堆栈，只返回通用错误提示
+    - HTTPException 由 FastAPI 默认处理，不会进入此处理器
+    """
+    logger.exception(f"未处理的异常 | path={request.url.path} | method={request.method}")
+    return FastAPIJSONResponse(
+        status_code=500,
+        content={
+            "ok": False,
+            "detail": "服务器内部错误，请稍后重试或联系管理员",
+            "error_type": type(exc).__name__,
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTPException 统一包装为 {ok, detail} 格式，与业务接口响应风格一致。"""
+    return FastAPIJSONResponse(
+        status_code=exc.status_code,
+        content={"ok": False, "detail": exc.detail},
+        headers=exc.headers,
+    )
 
 
 # 资源归属校验：只允许本人访问自己的记忆/会话，管理员角色放行
@@ -118,7 +167,8 @@ def check_db_health():
 
 # ===== 认证接口：MySQL 用户表校验 =====
 
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
+# 修复：使用 get_env_int 提供默认值 15，避免环境变量缺失时 int(None) 报错
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = get_env_int("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 15)
 
 @app.post("/api/login")
 def login(request_body: LoginRequest):
@@ -152,8 +202,12 @@ def login(request_body: LoginRequest):
 
 @app.post("/api/register")
 def register(request_body: RegisterRequest):
-
-    flag, response = login_service.register(*request_body)
+    # 显式传递参数，替代原 *request_body 隐式展开
+    flag, response = login_service.register(
+        username=request_body.userName,
+        user_id=request_body.userId,
+        password=request_body.password
+    )
     if flag:
         return Response.success(response)
     else:
@@ -174,7 +228,7 @@ def recover(request_body: RecoverRequest):
 
 
 # ===== 前端静态托管（开发模式：localhost:8000 直达页面，免 Nginx）=====
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "recourses" / "frontend"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "resources" / "frontend"
 
 # 认证页面（SPA 路由）：Vue Router history 模式无 #，直链/刷新 /api/login 等路径时
 # 由后端直接返回 index.html，交给前端路由渲染对应认证组件（nginx 走 /api/ 代理同样生效）

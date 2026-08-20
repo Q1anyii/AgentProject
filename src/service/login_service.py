@@ -95,9 +95,10 @@ class LoginService:
         conn = self.get_connection()
         try:
             cur = conn.cursor()
+            # 修复：参数必须以元组形式传递 (user_id,)，不能直接传字符串
             cur.execute(
                 "SELECT * FROM userInfo WHERE user_id=%s",
-                user_id
+                (user_id,)
             )
             user_info = cur.fetchone()
             if user_info:
@@ -130,20 +131,30 @@ class LoginService:
         finally:
             conn.close()
 
-    def register(self, *args):
+    def register(self, username, user_id, password):
+        """用户注册。
+
+        Args:
+            username: 用户名
+            user_id: 用户 ID
+            password: 明文密码（内部会 bcrypt 哈希）
+
+        Returns:
+            tuple: (flag, response)，flag=True 表示成功
+        """
         conn = self.get_connection()
         create_time = datetime.now()
         update_time = datetime.now()
-        username, user_id, password = args
-        placeholders = ", ".join(["%s"] * (len(args)+3))
         flag = False
         try:
             cur = conn.cursor()
             sql = "SELECT user_id FROM userInfo WHERE user_id=%s"
-            if cur.execute(sql, user_id):
+            # 修复：参数必须以元组形式传递 (user_id,)
+            if cur.execute(sql, (user_id,)):
                 return flag, "该用户已存在"
             password = get_password_hash(password)
-            sql = f"INSERT into userinfo(id, user_id, password, username, create_time, update_time) VALUES ({placeholders})"
+            # 显式列出 6 个占位符，对应 (id, user_id, password, username, create_time, update_time)
+            sql = "INSERT into userinfo(id, user_id, password, username, create_time, update_time) VALUES (%s, %s, %s, %s, %s, %s)"
             success = cur.execute(sql, (Random.gen_simple_inc_random(), user_id, password, username, create_time, update_time))
             flag = True
             return flag, success
@@ -159,7 +170,8 @@ class LoginService:
         try:
             cur = conn.cursor()
             sql = "SELECT user_id, password FROM userInfo WHERE user_id = %s"
-            exist = cur.execute(sql, user_id)
+            # 修复：参数必须以元组形式传递 (user_id,)
+            exist = cur.execute(sql, (user_id,))
             if not exist:
                 return f"用户{user_id}不存在"
             user_info = cur.fetchone()

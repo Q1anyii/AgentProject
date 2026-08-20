@@ -20,6 +20,7 @@ from graphs.retrieve_graph import build_retrieve_graph
 from graphs.tool_graph import build_tool_graph
 from init import model, system_prompt
 from utils.doc_util import documents_to_dicts
+from constant.prompt_constants import MEMORY_EXTRACT_PROMPT, CLASSIFIER_PROMPT, NO_INFO_MARKS
 
 
 def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
@@ -157,27 +158,12 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
 
         return {"messages": [HumanMessage(content=input_str), ai_reply]}
 
-    MEMORY_EXTRACT_PROMPT = """你是长期记忆管理器，负责维护用户档案。
-
-    根据【本轮对话】，更新【已有档案】：
-    1. 只记录长期有效的事实（如姓名、职业、身份、偏好、习惯、目标等），忽略一次性请求与寒暄。
-    2. 若本轮没有值得记录的新信息，只输出一个词：无。
-    3. 有新信息则输出合并后的完整档案，直接输出文本，不要任何解释或 JSON。
-
-    【已有档案】
-    {old_profile}
-
-    【本轮对话】
-    用户：{input_str}
-    助手：{llm_output}"""
-
     def memory_node(state: OverAllState, config: RunnableConfig, store: BaseStore) -> None:
         """将本轮对话中的长期信息提取并写入 store（按用户隔离）。"""
         user_id = config["configurable"].get("user_id", "default")
         namespace = ("rag_chat", user_id)
 
-        # memory_node 中，把写入条件从"非空"改为"非占位符且内容有变化"
-        NO_INFO_MARKS = {"（无）", "无", "无新信息", "暂无", "无新增信息"}
+        # NO_INFO_MARKS 已移至 constant/prompt_constants.py 统一管理
 
         # 读取已有档案
         item = store.get(namespace, "user_profile")
@@ -209,13 +195,6 @@ def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整
         if new_profile and new_profile != original_profile:
             store.put(namespace, "user_profile", {"profile": new_profile})
             logger.info(f"长期记忆已更新（user_id={user_id}）：{new_profile[:100]}")
-
-    CLASSIFIER_PROMPT = """你是问答路由，判断用户问题是否需要检索"在线学习平台"知识库。
-
-    需要检索：涉及平台业务的具体问题，如账号登录、密码重置、课程购买、作业提交、学习记录、费用等。
-    不需要检索：寒暄问候、自我介绍、闲聊、与平台无关的常识问题，或仅凭已有对话即可回答的问题。
-
-    只输出一个词：yes 或 no。"""
 
     def classify_node(state: OverAllState) -> OverAllState:
         """判断本轮问题是否需要知识库检索（仅在需要时走 retrieval_node）。"""

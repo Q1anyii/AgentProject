@@ -9,8 +9,9 @@ from langchain_community.document_loaders.text import TextLoader
 from langchain_core.runnables.config import RunnableConfig
 from langchain_openai import OpenAIEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
-from load_dotenv import load_dotenv
+from dotenv import load_dotenv
 from pymysql.cursors import DictCursor
+from constant.embedding_constants import COLLECTION_NAME
 
 load_dotenv(override=True)
 
@@ -36,7 +37,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 prompt_file = os.path.join(
     current_dir,
     "..",
-    "recourses",
+    "resources",
     "system_prompt",
     "online_learning_platform_customer_temp.txt"
 )
@@ -60,7 +61,6 @@ def online_rerank(query: str, documents: list[str], top_n: int = 10) -> list[dic
     resp.raise_for_status()
     return sorted(resp.json()["results"], key=lambda r: r["relevance_score"], reverse=True)
 
-COLLECTION_NAME = "FAQ_KNOWLEDGE_BASE"
 
 class CustomPostgresSaver(PostgresSaver):
     def list(

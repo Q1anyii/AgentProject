@@ -34,7 +34,7 @@ def get_current_user(config: RunnableConfig) -> dict:
     if not user_info:
         return {"userId": None, "username": None, "message": "当前无登录用户信息"}
     return {
-        "userId": user_info.userId,
+        "userId": user_info.user_id,
         "username": user_info.username,
     }
 

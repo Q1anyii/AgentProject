@@ -4,7 +4,6 @@ import os
 import chromadb
 
 from pathlib import Path
-from langgraph.cache.memory import InMemoryCache
 from langgraph.store.postgres import PostgresStore
 from psycopg_pool import ConnectionPool
 from langchain_core.messages import BaseMessage, AIMessageChunk
@@ -15,38 +14,15 @@ from graphs.retrieve_graph import build_retrieve_graph
 from init import COLLECTION_NAME, CustomPostgresSaver
 from service.cache_service import cache_service
 
-"""
-ChatService（类，收拢全部资源与业务方法）
-│
-├── __init__()                    # 只存配置（.env 的 DB URL），不建任何重资源
-│
-├── open()  ←→  close()           # 幂等；对应 FastAPI lifespan 的启动/关闭
-│   ├── chroma client + collection          ← 原模块级单例收进来
-│   ├── ConnectionPool + setup()            ← 原 build_chat_graph 内逻辑
-│   ├── PostgresSaver / PostgresStore       ← 共用 pool
-│   ├── InMemoryCache()                     ← 实例级，随 open/close 同生命周期
-│   └── _build_rerank_graph() / 主图 compile（只 build 一次）
-│
-├── 业务方法（main.py 端点的全部逻辑收编）
-│   ├── invoke(user_id, thread_id, input_str) -> str   # config 组装 + invoke + 取末条
-│   ├── a_invoke(...)                                  # asyncio.to_thread(invoke)
-│   ├── get_history(thread_id) / list_sessions(user_id)
-│   ├── get_memory(user_id) / delete_session(thread_id)
-│   └── 属性暴露: .graph / .pool / .collection（端点特殊场景兜底）
-│
-└── 模块级工厂 get_chat_service()   # 或直接由 lifespan new + open/close
-"""
-
 
 class ChatService:
-
 
     POSTGRESQL_DB_URL = os.getenv("POSTGRESQL_DB_URL")
     persist_path: str | Path
     db_url: str
 
 
-    def __init__(self, persist_path="../recourses/chroma_db", db_url=None):
+    def __init__(self, persist_path="../resources/chroma_db", db_url=None):
         self.persist_path = persist_path
         self.db_url = db_url or os.getenv("POSTGRESQL_DB_URL")
         # 资源占位，open() 里真正创建，close() 里释放
@@ -82,8 +58,7 @@ class ChatService:
         self.store = PostgresStore(self.pool)  # ← self.
         self.checkpointer.setup()
         self.store.setup()
-        redis_client = cache_service.redis
-        self.cache = RedisCache(redis_client)  # ← self.，且 compile 用它
+        self.cache = RedisCache(cache_service.redis)  # ← self.，且 compile 用它
         self.retrieve_graph = build_retrieve_graph(self)  # 只 build 一次，替代 @lru_cache
         self.main_graph = build_main_graph(self)
 

@@ -1,48 +1,87 @@
-<<<<<<< HEAD
-# ---- 环境变量（含 API 密钥，严禁提交） ----
-=======
-# ---- 环境变量与密钥（严禁提交） ----
->>>>>>> dev
+# ============================================================
+# .gitignore — 米塔 AI 智能客服
+# ============================================================
+
+# ---- 环境变量与密钥（严禁提交）----
 .env
 *.env
+# 注意：.env.example 是模板文件，必须提交（不匹配 *.env，因为不以 .env 结尾）
 
 # ---- Python 缓存 ----
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # ---- 虚拟环境 ----
 .venv/
 venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
 # ---- IDE 配置 ----
 .idea/
 *.iml
 .vscode/
+*.swp
+*.swo
+*~
 
-<<<<<<< HEAD
-# ---- 本地数据（向量库，需重建，不入库） ----
-=======
-# ---- 本地数据（向量库，不入库） ----
->>>>>>> dev
+# ---- 本地数据（向量库，需重建，不入库）----
+resources/chroma_db/
 recourses/chroma_db/
+
+# ---- 缓存目录 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # ---- Jupyter 检查点 ----
 .ipynb_checkpoints/
 
-<<<<<<< HEAD
-# ---- 操作系统文件 ----
-.DS_Store
-Thumbs.db
-
-# ---- 日志 / 临时文件 ----
-*.log
-*.tmp
-=======
 # ---- 操作系统 / 日志 / 临时文件 ----
 .DS_Store
 Thumbs.db
+desktop.ini
 *.log
 *.tmp
->>>>>>> dev
+*.bak
+*.old
+
+# ---- 前端构建产物（如有）----
+node_modules/
+dist/
+build/
+*.local
+
+# ---- 测试覆盖率 ----
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# ---- 临时脚本 / 个人配置 ----
+*.local.py
+config.local.py

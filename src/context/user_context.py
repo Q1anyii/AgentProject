@@ -11,9 +11,10 @@ class CtxUser:
     update_time: Optional[ datetime]
 
 
-    def __init__(self, uid, user_id,password, username, create_time, update_time):
+    def __init__(self, uid, user_id, password, username, create_time, update_time):
         self.id = uid
-        self.userId = user_id
+        # 修复：属性名统一为 snake_case，与类注解一致
+        self.user_id = user_id
         self.username = username
         self.create_time = create_time
         self.update_time = update_time
