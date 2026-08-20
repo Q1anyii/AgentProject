@@ -9,9 +9,11 @@ from langgraph.store.postgres import PostgresStore
 from psycopg_pool import ConnectionPool
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from loguru import logger
+from langgraph.cache.redis import RedisCache  # 可能需要 langgraph-checkpoint-redis 扩展
 from graphs.main_graph import build_main_graph
 from graphs.retrieve_graph import build_retrieve_graph
 from init import COLLECTION_NAME, CustomPostgresSaver
+from service.cache_service import cache_service
 
 """
 ChatService（类，收拢全部资源与业务方法）
@@ -43,15 +45,17 @@ class ChatService:
     persist_path: str | Path
     db_url: str
 
+
     def __init__(self, persist_path="../recourses/chroma_db", db_url=None):
         self.persist_path = persist_path
         self.db_url = db_url or os.getenv("POSTGRESQL_DB_URL")
         # 资源占位，open() 里真正创建，close() 里释放
         self.client = self.collection = None
         self.pool = self.checkpointer = self.store = None
-        self.cache = None
         self.main_graph = None            # 主对话图
         self.rerank_graph = None     # 改写+重排图
+        self.cache = None
+        self.redis_client = None
 
     def open(self):
         from init import embedding_function
@@ -78,7 +82,8 @@ class ChatService:
         self.store = PostgresStore(self.pool)  # ← self.
         self.checkpointer.setup()
         self.store.setup()
-        self.cache = InMemoryCache()  # ← self.，且 compile 用它
+        redis_client = cache_service.redis
+        self.cache = RedisCache(redis_client)  # ← self.，且 compile 用它
         self.retrieve_graph = build_retrieve_graph(self)  # 只 build 一次，替代 @lru_cache
         self.main_graph = build_main_graph(self)
 

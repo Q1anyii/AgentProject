@@ -46,6 +46,7 @@ class CacheService:
         self._lsh_dim = 0
         self.cache_ttl =cache_ttl
 
+
     def open(self):
         self.create_index()
         try:
