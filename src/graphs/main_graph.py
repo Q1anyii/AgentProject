@@ -1,9 +1,9 @@
-from typing import Annotated, Optional, TYPE_CHECKING, Any
+from typing import Annotated, Optional, Any
 
+from langchain_core.tools import BaseTool
 from langgraph.types import CachePolicy, Send
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
-from chromadb import QueryResult
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.constants import START, END
 from langgraph.graph.message import MessagesState
@@ -11,22 +11,18 @@ from langgraph.graph.state import StateGraph
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 from pydantic import Field
-from rich import print as rprint
-
-if TYPE_CHECKING:
-    # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
-    from service.chat_service import ChatService
-from graphs.retrieve_graph import build_retrieve_graph
 from graphs.tool_graph import build_tool_graph
 from init import model, system_prompt
 from utils.doc_util import documents_to_dicts
 from constant.prompt_constants import MEMORY_EXTRACT_PROMPT, CLASSIFIER_PROMPT, NO_INFO_MARKS
 
 
-def build_main_graph(self, mcp_tools: list | None = None):
-
-    retrieve_graph = self.retrieve_graph or build_retrieve_graph(self=self)
-
+def build_main_graph(retrieve_graph,
+    pool,
+    checkpointer,
+    store,
+    cache=None,
+    mcp_tools: list[BaseTool] | None = None,):
     # 工具：LLM 需要时可调用（用户信息/会话总结），工具通过请求级上下文读取数据
     tools = build_tool_graph(mcp_tools)  # 原 build_tool_graph() 调用点替换
     tool_node = ToolNode(tools)
@@ -222,13 +218,13 @@ def build_main_graph(self, mcp_tools: list | None = None):
     def route_after_llm(state: OverAllState) -> str:
         """llm_node 之后：有工具调用则执行 ToolNode，否则进入记忆节点收尾"""
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else "memory_node"
+        return "tool_node" if getattr(last, "tool_calls", None) else "memory_node"
 
     builder = StateGraph(state_schema=OverAllState)
     builder.add_node("classify_node", classify_node)
     builder.add_node("retrieve_node", retrieve_node, cache_policy=CachePolicy(ttl=10))
     builder.add_node("llm_node", llm_node)
-    builder.add_node("tools", tool_node)
+    builder.add_node("tool_node", tool_node)
     builder.add_node("memory_node", memory_node)
 
     builder.add_edge(START, "classify_node")
@@ -241,14 +237,13 @@ def build_main_graph(self, mcp_tools: list | None = None):
     builder.add_conditional_edges(
         "llm_node",
         route_after_llm,
-        ["tools", "memory_node"],
+        ["tool_node", "memory_node"],
     )
-    builder.add_edge("tools", "llm_node")  # 工具执行结果回到 LLM，生成最终回答
+    builder.add_edge("tool_node", "llm_node")  # 工具执行结果回到 LLM，生成最终回答
     builder.add_edge("memory_node", END)
 
     # 创建连接池（open=True 表示立即打开连接）
     # 必须开启 autocommit：迁移脚本含 CREATE INDEX CONCURRENTLY，不能在事务块中执行
-    pool = self.pool
     try:
         pool.check()
     except Exception as e:
@@ -256,15 +251,9 @@ def build_main_graph(self, mcp_tools: list | None = None):
         logger.error(f"真实错误：{e}")
         raise
 
-    # 直接实例化 PostgresSaver（短期记忆：按 thread_id 恢复历史对话）
-    checkpointer = self.checkpointer
-
-    # PostgresStore（长期记忆：跨会话保存用户档案），与 checkpointer 共用连接池
-    store = self.store
-
     checkpointer.setup()
     store.setup()
 
-    main_graph = builder.compile(checkpointer=checkpointer, store=store, cache=self.cache)
+    main_graph = builder.compile(checkpointer=checkpointer, store=store, cache=cache)
 
     return main_graph

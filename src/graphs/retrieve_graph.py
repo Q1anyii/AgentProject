@@ -10,16 +10,13 @@ from pydantic import Field, BaseModel, ConfigDict
 from service.cache_service import cache_service as _cache_service
 from utils.doc_util import unpack_query_results, documents_to_dicts
 import json, re
-if TYPE_CHECKING:
-    # 仅用于类型注解，运行时导入会与 chat_service 形成循环依赖
-    from service.chat_service import ChatService
 from init import model, online_rerank
 from constant.retrieval_constants import TOP_K, DISTANCE_THRESHOLD, REWRITE_PROMPT, RRF_K
 
 
-def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻辑整体搬入
-    collection = self.collection  # ← 关键：闭包捕获 self.collection，retrieve 节点内继续用 collection 变量
-    # Redis 检索缓存：全局单例（main.py lifespan 统一 open/close），节点内直接使用，不自行管理生命周期
+def build_retrieve_graph(collection):
+    # ← 原 query_rerank_graph 逻辑整体搬入
+     # Redis 检索缓存：全局单例（main.py lifespan 统一 open/close），节点内直接使用，不自行管理生命周期
     cache_service = _cache_service
 
     class OutputState(TypedDict):

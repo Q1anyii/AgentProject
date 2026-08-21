@@ -59,8 +59,15 @@ class ChatService:
         self.checkpointer.setup()
         self.store.setup()
         self.cache = RedisCache(cache_service.redis)  # ← self.，且 compile 用它
-        self.retrieve_graph = build_retrieve_graph(self)  # 只 build 一次，替代 @lru_cache
-        self.main_graph = build_main_graph(self, mcp_tools=mcp_tools)
+        self.retrieve_graph = build_retrieve_graph(self.collection)   # 只 build 一次，替代 @lru_cache
+        self.main_graph = build_main_graph(  # 改：显式传参
+            retrieve_graph=self.retrieve_graph,
+            pool=self.pool,
+            checkpointer=self.checkpointer,
+            store=self.store,
+            cache=self.cache,
+            mcp_tools=mcp_tools,
+        )
 
 
     def close(self, timeout:int =10):
