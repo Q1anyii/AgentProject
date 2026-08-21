@@ -20,7 +20,7 @@ async def chat(query: str, thread_id: str = "mcp-default", user_id: str = "mcp-u
 async def get_current_user(user_id: str) -> dict:
     """查询用户账户信息（复用 login_service，补全现有空壳实现）"""
     row = login_service.get_user_by_id(user_id)
-    return {"user_id": ..., "username": ..., "create_time": ...} | {"error": "用户不存在"}
+    return {"user_id": row["user_id"], "username": row["username"], "create_time": row["create_time"]} | {"error": "用户不存在"}
 
 @mcp.tool()
 async def summarize(thread_id: str, user_id: str) -> str:

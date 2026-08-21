@@ -137,6 +137,139 @@
         }
 
         /* ============================================================
+           多主题系统（通过 data-theme 属性切换）
+           主题列表：default / dark / ocean / sunset / forest / lavender
+           ============================================================ */
+        [data-theme="dark"] {
+            --bg-body: #1A1A19;
+            --bg-surface: #252827;
+            --bg-sidebar: #0F1110;
+            --bg-sidebar-hover: #1C1E1D;
+            --bg-input: #252827;
+            --bg-glass: rgba(37, 40, 39, 0.85);
+            --text-primary: #F0EDE6;
+            --text-secondary: #A8A59C;
+            --text-muted: #6E6C66;
+            --text-inverse: #1A1A19;
+            --text-inverse-muted: #4A4843;
+            --accent: #6BA896;
+            --accent-light: #2A3D36;
+            --accent-hover: #7DB8A6;
+            --accent-soft: rgba(107, 168, 150, 0.15);
+            --border: #3A3D3B;
+            --border-strong: #4A4D4B;
+            --danger: #D4766F;
+            --danger-light: #3D2826;
+            --success: #6BA896;
+            --warning: #D4B06A;
+            --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+            --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+            --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        [data-theme="ocean"] {
+            --bg-body: #F0F4F8;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #1E3A5F;
+            --bg-sidebar-hover: #2A4A73;
+            --bg-input: #FFFFFF;
+            --bg-glass: rgba(255, 255, 255, 0.72);
+            --text-primary: #1A2B3C;
+            --text-secondary: #5A6B7C;
+            --text-muted: #8A9BAC;
+            --text-inverse: #F0F4F8;
+            --text-inverse-muted: #A0B0C0;
+            --accent: #2E6B9E;
+            --accent-light: #E0ECF5;
+            --accent-hover: #245A85;
+            --accent-soft: rgba(46, 107, 158, 0.12);
+            --border: #D8E2EC;
+            --border-strong: #C0D0E0;
+            --danger: #C44B4B;
+            --danger-light: #F5E0E0;
+            --success: #2E8B6B;
+            --warning: #C49A2E;
+        }
+
+        [data-theme="sunset"] {
+            --bg-body: #FBF5F0;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #3D2B1F;
+            --bg-sidebar-hover: #4D3B2F;
+            --bg-input: #FFFFFF;
+            --bg-glass: rgba(255, 255, 255, 0.72);
+            --text-primary: #2B1F1A;
+            --text-secondary: #6B5B4F;
+            --text-muted: #9B8B7F;
+            --text-inverse: #FBF5F0;
+            --text-inverse-muted: #B0A090;
+            --accent: #C4622E;
+            --accent-light: #F5E8DC;
+            --accent-hover: #A8521E;
+            --accent-soft: rgba(196, 98, 46, 0.12);
+            --border: #E8DCD0;
+            --border-strong: #D0C0B0;
+            --danger: #B34747;
+            --danger-light: #F5E0E0;
+            --success: #6B8E4E;
+            --warning: #C49A2E;
+        }
+
+        [data-theme="forest"] {
+            --bg-body: #F0F5F0;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #1F3D2B;
+            --bg-sidebar-hover: #2F4D3B;
+            --bg-input: #FFFFFF;
+            --bg-glass: rgba(255, 255, 255, 0.72);
+            --text-primary: #1A2B1F;
+            --text-secondary: #5A6B5F;
+            --text-muted: #8A9B8F;
+            --text-inverse: #F0F5F0;
+            --text-inverse-muted: #A0B0A0;
+            --accent: #2E8B57;
+            --accent-light: #E0F0E8;
+            --accent-hover: #247045;
+            --accent-soft: rgba(46, 139, 87, 0.12);
+            --border: #D8E8DC;
+            --border-strong: #C0D8C8;
+            --danger: #B34747;
+            --danger-light: #F5E0E0;
+            --success: #2E8B57;
+            --warning: #C49A2E;
+        }
+
+        [data-theme="lavender"] {
+            --bg-body: #F5F0F8;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #2D1F3D;
+            --bg-sidebar-hover: #3D2F4D;
+            --bg-input: #FFFFFF;
+            --bg-glass: rgba(255, 255, 255, 0.72);
+            --text-primary: #231A2B;
+            --text-secondary: #635A6B;
+            --text-muted: #938A9B;
+            --text-inverse: #F5F0F8;
+            --text-inverse-muted: #B0A8B8;
+            --accent: #7B4FA8;
+            --accent-light: #ECE0F5;
+            --accent-hover: #653F8F;
+            --accent-soft: rgba(123, 79, 168, 0.12);
+            --border: #E0D8E8;
+            --border-strong: #C8C0D0;
+            --danger: #B3476B;
+            --danger-light: #F5E0E8;
+            --success: #4F8B7B;
+            --warning: #C49A4F;
+        }
+
+        /* 主题切换过渡动画 */
+        body, .sidebar, .main-header, .input-card, .message-content {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+
+        /* ============================================================
            基础重置
            ============================================================ */
         *, *::before, *::after {
@@ -1189,6 +1322,411 @@
             padding: 48px 0;
             color: var(--text-inverse-muted);
         }
+
+        /* ============================================================
+           用户头像下拉菜单
+           ============================================================ */
+        .user-menu-wrapper {
+            position: relative;
+        }
+        .user-avatar-btn {
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            text-align: left;
+            border-radius: var(--radius-md);
+            padding: 8px;
+            transition: background-color 0.2s;
+        }
+        .user-avatar-btn:hover {
+            background-color: var(--bg-sidebar-hover);
+        }
+        .user-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            margin-bottom: 8px;
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            z-index: 1000;
+        }
+        .user-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: background-color 0.15s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+        }
+        .user-dropdown-item:hover {
+            background-color: var(--accent-light);
+            color: var(--accent);
+        }
+        .user-dropdown-item svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        /* ============================================================
+           模态弹窗（个人信息 / 系统设置）
+           ============================================================ */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            animation: fadeIn 0.2s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal {
+            background: var(--bg-surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
+            width: 90%;
+            max-width: 560px;
+            max-height: 85vh;
+            overflow-y: auto;
+            animation: slideUp 0.25s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal-header h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 4px;
+            border-radius: var(--radius-sm);
+            transition: color 0.15s, background-color 0.15s;
+        }
+        .modal-close:hover {
+            color: var(--text-primary);
+            background-color: var(--bg-body);
+        }
+        .modal-body {
+            padding: 24px;
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background: var(--bg-input);
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+        .form-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* 头像选择 */
+        .avatar-selector {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .avatar-preview {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: var(--text-inverse);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: 600;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        .avatar-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .btn-ghost {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-ghost:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-light);
+        }
+
+        /* 主题选择器 */
+        .theme-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .theme-option {
+            padding: 12px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s;
+            background: var(--bg-surface);
+        }
+        .theme-option:hover {
+            border-color: var(--accent);
+        }
+        .theme-option.active {
+            border-color: var(--accent);
+            background: var(--accent-light);
+        }
+        .theme-preview {
+            width: 100%;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 8px;
+        }
+        .theme-name {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* MCP 配置编辑器 */
+        .mcp-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .mcp-item {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            background: var(--bg-body);
+        }
+        .mcp-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .mcp-item-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .mcp-remove {
+            background: none;
+            border: none;
+            color: var(--danger);
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+        }
+        .mcp-remove:hover {
+            background: var(--danger-light);
+        }
+
+        /* ============================================================
+           文件上传按钮（输入框 + 号）
+           ============================================================ */
+        .input-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .upload-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .upload-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-light);
+        }
+        .upload-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        .uploaded-files {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .uploaded-file-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: var(--accent-light);
+            color: var(--accent);
+            border-radius: var(--radius-full);
+            font-size: 12px;
+        }
+        .uploaded-file-tag .remove {
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        .uploaded-file-tag .remove:hover {
+            opacity: 1;
+        }
+        .upload-dropdown {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            margin-bottom: 8px;
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+            padding: 8px;
+            z-index: 100;
+            min-width: 180px;
+        }
+        .upload-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--text-primary);
+            transition: background-color 0.15s;
+        }
+        .upload-dropdown-item:hover {
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        /* ============================================================
+           暂停按钮（AI 回复生成中）
+           ============================================================ */
+        .stop-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--danger);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            flex-shrink: 0;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(179, 86, 79, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(179, 86, 79, 0); }
+        }
+        .stop-btn:hover {
+            background: var(--danger-hover, #9A3A33);
+            transform: scale(1.05);
+        }
+        .stop-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* 加载圈覆盖 */
+        .send-btn.loading {
+            background: var(--border-strong);
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -1369,11 +1907,12 @@
             }
         }
 
-        async function apiChat(query, threadId, onStream) {
+        async function apiChat(query, threadId, onStream, signal) {
             const response = await fetch(`${API_BASE}/api/chat/`, {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ query, thread_id: threadId })
+                body: JSON.stringify({ query, thread_id: threadId }),
+                signal: signal,
             });
             syncTokenFromHeaders(response.headers);
             handleAuthError(response);
@@ -1807,19 +2346,33 @@
                             </button>
                         </div>
                         <div class="sidebar-footer">
-                            <div class="user-card">
-                                <div class="user-avatar">{{ userAvatar }}</div>
-                                <div class="user-info">
-                                    <div class="user-name">{{ user?.name || '用户' }}</div>
-                                    <div class="user-role">{{ user?.role || '学员' }}</div>
+                            <div class="user-menu-wrapper">
+                                <div v-if="userMenuOpen" class="user-dropdown" @click.stop>
+                                    <button class="user-dropdown-item" @click="openProfileModal">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                                        个人信息
+                                    </button>
+                                    <button class="user-dropdown-item" @click="openSettingsModal">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                                        系统设置
+                                    </button>
                                 </div>
-                                <button class="logout-btn" @click="logout" title="退出登录" aria-label="退出登录">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                                        <polyline points="16 17 21 12 16 7"></polyline>
-                                        <line x1="21" y1="12" x2="9" y2="12"></line>
-                                    </svg>
-                                </button>
+                                <div class="user-card">
+                                    <button class="user-avatar-btn" @click="toggleUserMenu">
+                                        <div class="user-avatar">{{ userAvatar }}</div>
+                                        <div class="user-info">
+                                            <div class="user-name">{{ user?.name || '用户' }}</div>
+                                            <div class="user-role">{{ user?.role || '学员' }}</div>
+                                        </div>
+                                    </button>
+                                    <button class="logout-btn" @click="logout" title="退出登录" aria-label="退出登录">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                            <polyline points="16 17 21 12 16 7"></polyline>
+                                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                             <div class="health-status">
                                 <span class="health-dot" :class="healthStatus"></span>
@@ -1910,16 +2463,157 @@
                                     @input="autoResize"
                                     ref="textarea"
                                 ></textarea>
-                                <button class="send-btn" @click="sendMessage" :disabled="!canSend" aria-label="发送消息">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                    </svg>
-                                </button>
+                                <div class="input-actions">
+                                    <!-- + 号上传按钮 -->
+                                    <div class="user-menu-wrapper" style="position: relative;">
+                                        <button v-if="uploadMenuOpen" class="upload-dropdown" @click.stop>
+                                            <label class="upload-dropdown-item" style="cursor: pointer;">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                                上传文件
+                                                <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none;" multiple accept=".txt,.md,.csv,.json,.xml,.html,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.py,.js,.ts,.java,.zip,.rar,.7z">
+                                            </label>
+                                        </button>
+                                        <button class="upload-btn" @click="toggleUploadMenu" title="上传文件" aria-label="上传文件">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                    </div>
+                                    <!-- 发送按钮 / 暂停按钮 -->
+                                    <button v-if="!isLoading" class="send-btn" @click="sendMessage" :disabled="!canSend" aria-label="发送消息">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                        </svg>
+                                    </button>
+                                    <button v-else class="stop-btn" @click="stopResponse" title="停止回复" aria-label="停止回复">
+                                        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- 已上传文件列表 -->
+                            <div v-if="uploadedFiles.length > 0" class="uploaded-files">
+                                <span v-for="(file, idx) in uploadedFiles" :key="idx" class="uploaded-file-tag">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                    {{ file.name }}
+                                    <span class="remove" @click="removeUploadedFile(idx)">×</span>
+                                </span>
                             </div>
                             <p class="input-hint">按 Enter 发送，Shift + Enter 换行</p>
                         </div>
                     </main>
+
+                    <!-- ===== 个人信息弹窗 ===== -->
+                    <div v-if="profileModalOpen" class="modal-overlay" @click.self="closeProfileModal">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3>个人信息</h3>
+                                <button class="modal-close" @click="closeProfileModal" aria-label="关闭">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <!-- 头像设置 -->
+                                <div class="form-group">
+                                    <label>头像</label>
+                                    <div class="avatar-selector">
+                                        <div class="avatar-preview">
+                                            <img v-if="profileForm.avatar" :src="profileForm.avatar" alt="头像">
+                                            <span v-else>{{ profileForm.username?.charAt(0)?.toUpperCase() || 'U' }}</span>
+                                        </div>
+                                        <div class="avatar-actions">
+                                            <label class="btn-ghost" style="cursor: pointer;">
+                                                上传头像
+                                                <input type="file" accept="image/*" @change="handleAvatarUpload" style="display: none;">
+                                            </label>
+                                            <button class="btn-ghost" @click="profileForm.avatar = ''">使用默认</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- 用户名 -->
+                                <div class="form-group">
+                                    <label>用户名</label>
+                                    <input v-model="profileForm.username" type="text" placeholder="请输入用户名" maxlength="32">
+                                </div>
+                                <!-- 助手风格 / 自定义设定 -->
+                                <div class="form-group">
+                                    <label>助手风格 / 自定义设定</label>
+                                    <textarea v-model="profileForm.assistant_style" placeholder="描述你希望 AI 助手具备的风格、角色设定或特殊要求（如：你是一个专业的编程助手，回答简洁，多用代码示例）" rows="3" maxlength="500"></textarea>
+                                    <div class="form-hint">此设定会作为 system prompt 的一部分，影响 AI 的回答风格（最多 500 字）</div>
+                                </div>
+                                <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0;">
+                                <!-- 修改密码 -->
+                                <div class="form-group">
+                                    <label>原密码</label>
+                                    <input v-model="profileForm.old_password" type="password" placeholder="请输入原密码">
+                                </div>
+                                <div class="form-group">
+                                    <label>新密码</label>
+                                    <input v-model="profileForm.new_password" type="password" placeholder="请输入新密码（至少6位）">
+                                </div>
+                                <div class="form-group">
+                                    <label>确认新密码</label>
+                                    <input v-model="profileForm.confirm_password" type="password" placeholder="请再次输入新密码">
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn-ghost" @click="closeProfileModal">取消</button>
+                                <button class="btn-primary" @click="saveProfile" :disabled="profileSaving">
+                                    {{ profileSaving ? '保存中...' : '保存修改' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== 系统设置弹窗 ===== -->
+                    <div v-if="settingsModalOpen" class="modal-overlay" @click.self="closeSettingsModal">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3>系统设置</h3>
+                                <button class="modal-close" @click="closeSettingsModal" aria-label="关闭">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <!-- 主题选择 -->
+                                <div class="form-group">
+                                    <label>主题配色</label>
+                                    <div class="theme-grid">
+                                        <div v-for="t in themes" :key="t.value" class="theme-option" :class="{ active: settingsForm.theme === t.value }" @click="settingsForm.theme = t.value; applyTheme(t.value)">
+                                            <div class="theme-preview" :style="{ background: t.preview }"></div>
+                                            <div class="theme-name">{{ t.name }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0;">
+                                <!-- MCP 服务器配置 -->
+                                <div class="form-group">
+                                    <label>MCP 服务器配置</label>
+                                    <div class="form-hint" style="margin-bottom: 10px;">配置 Model Context Protocol 服务器，扩展 AI 助手的工具能力（JSON 格式）</div>
+                                    <div class="mcp-list">
+                                        <div v-for="(mcp, idx) in settingsForm.mcp_servers" :key="idx" class="mcp-item">
+                                            <div class="mcp-item-header">
+                                                <span class="mcp-item-title">服务器 {{ idx + 1 }}</span>
+                                                <button class="mcp-remove" @click="settingsForm.mcp_servers.splice(idx, 1)">删除</button>
+                                            </div>
+                                            <div class="form-group" style="margin-bottom: 8px;">
+                                                <input v-model="mcp.name" type="text" placeholder="服务器名称（如：文件系统）" style="margin-bottom: 8px;">
+                                                <input v-model="mcp.command" type="text" placeholder="启动命令（如：npx）" style="margin-bottom: 8px;">
+                                                <input v-model="mcp.args" type="text" placeholder="参数（空格分隔，如：-y mcp-server-fs）">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button class="btn-ghost" @click="settingsForm.mcp_servers.push({ name: '', command: '', args: '' })" style="width: 100%; margin-top: 8px;">
+                                        + 添加 MCP 服务器
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn-ghost" @click="closeSettingsModal">取消</button>
+                                <button class="btn-primary" @click="saveSettings" :disabled="settingsSaving">
+                                    {{ settingsSaving ? '保存中...' : '保存设置' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `,
             setup() {
@@ -1935,6 +2629,40 @@
                 const healthStatus = ref('online');
                 const messagesContainer = ref(null);
                 const textarea = ref(null);
+                const fileInput = ref(null);
+
+                // ===== 新增：用户菜单 / 弹窗 / 上传 / 主题 =====
+                const userMenuOpen = ref(false);
+                const uploadMenuOpen = ref(false);
+                const profileModalOpen = ref(false);
+                const settingsModalOpen = ref(false);
+                const profileSaving = ref(false);
+                const settingsSaving = ref(false);
+                const uploadedFiles = ref([]);
+                const abortController = ref(null);
+
+                const profileForm = ref({
+                    username: '',
+                    avatar: '',
+                    assistant_style: '',
+                    old_password: '',
+                    new_password: '',
+                    confirm_password: '',
+                });
+
+                const settingsForm = ref({
+                    theme: 'default',
+                    mcp_servers: [],
+                });
+
+                const themes = [
+                    { value: 'default', name: '默认', preview: 'linear-gradient(135deg, #3D6B5B, #F7F5F0)' },
+                    { value: 'dark', name: '深色', preview: 'linear-gradient(135deg, #6BA896, #1A1A19)' },
+                    { value: 'ocean', name: '海洋', preview: 'linear-gradient(135deg, #2E6B9E, #F0F4F8)' },
+                    { value: 'sunset', name: '日落', preview: 'linear-gradient(135deg, #C4622E, #FBF5F0)' },
+                    { value: 'forest', name: '森林', preview: 'linear-gradient(135deg, #2E8B57, #F0F5F0)' },
+                    { value: 'lavender', name: '薰衣草', preview: 'linear-gradient(135deg, #7B4FA8, #F5F0F8)' },
+                ];
 
                 const quickQuestions = [
                     '如何重置密码？',
@@ -2144,6 +2872,9 @@
                         let renderTimer = null;
                         let saveTimer = null;
 
+                        // 创建 AbortController 用于停止回复
+                        abortController.value = new AbortController();
+
                         const answer = await apiChat(content, currentThreadId.value, (text) => {
                             streaming.value = true;
                             latestText = text;
@@ -2160,7 +2891,7 @@
                                     saveMessages();
                                 }, 500);
                             }
-                        });
+                        }, abortController.value.signal);
 
                         // 流结束：清掉未触发的节流器，确保最终内容一次性落库渲染
                         if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
@@ -2171,6 +2902,17 @@
                         saveSessions();
                         scrollToBottom();
                     } catch (err) {
+                        // 用户主动停止回复（AbortController.abort()）
+                        if (err.name === 'AbortError') {
+                            // 保留已生成的部分内容，不删除 AI 消息
+                            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+                            if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+                            aiMsg.content = aiMsg.content || '（已停止）';
+                            streaming.value = false;
+                            saveMessages();
+                            scrollToBottom();
+                            return;
+                        }
                         messages.value.pop();
                         saveMessages();
                         if (err && err.status === 403) {
@@ -2247,6 +2989,223 @@
                     healthTimer = setInterval(checkHealth, 30000);
                 });
 
+                // ===== 新增：用户菜单 / 弹窗 / 上传 / 主题 方法 =====
+
+                function toggleUserMenu() {
+                    userMenuOpen.value = !userMenuOpen.value;
+                    if (userMenuOpen.value) uploadMenuOpen.value = false;
+                }
+
+                function openProfileModal() {
+                    userMenuOpen.value = false;
+                    // 加载当前用户信息
+                    profileForm.value.username = user.value?.name || '';
+                    profileForm.value.avatar = user.value?.avatar || '';
+                    profileForm.value.assistant_style = user.value?.assistant_style || '';
+                    profileForm.value.old_password = '';
+                    profileForm.value.new_password = '';
+                    profileForm.value.confirm_password = '';
+                    profileModalOpen.value = true;
+                }
+
+                function closeProfileModal() {
+                    profileModalOpen.value = false;
+                }
+
+                function openSettingsModal() {
+                    userMenuOpen.value = false;
+                    // 加载当前设置
+                    settingsForm.value.theme = cache.get('theme') || 'default';
+                    settingsForm.value.mcp_servers = cache.get('mcp_servers') || [];
+                    settingsModalOpen.value = true;
+                }
+
+                function closeSettingsModal() {
+                    settingsModalOpen.value = false;
+                }
+
+                async function saveProfile() {
+                    profileSaving.value = true;
+                    try {
+                        // 更新基本信息
+                        const res = await fetch(`${API_BASE}/api/users/${user.value.id}/profile`, {
+                            method: 'PUT',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({
+                                username: profileForm.value.username,
+                                avatar: profileForm.value.avatar,
+                                assistant_style: profileForm.value.assistant_style,
+                            }),
+                        });
+                        syncTokenFromHeaders(res.headers);
+                        if (res.ok) {
+                            // 更新本地用户信息
+                            user.value.name = profileForm.value.username;
+                            user.value.avatar = profileForm.value.avatar;
+                            user.value.assistant_style = profileForm.value.assistant_style;
+                            cache.set(STORAGE_KEY.USER, user.value);
+                            showToast('个人信息已更新', 'success');
+                        }
+
+                        // 修改密码（如果填写了）
+                        if (profileForm.value.new_password) {
+                            if (profileForm.value.new_password !== profileForm.value.confirm_password) {
+                                showToast('两次输入的新密码不一致', 'error');
+                                return;
+                            }
+                            if (profileForm.value.new_password.length < 6) {
+                                showToast('新密码至少6位', 'error');
+                                return;
+                            }
+                            const pwdRes = await fetch(`${API_BASE}/api/users/${user.value.id}/password`, {
+                                method: 'PUT',
+                                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                                body: JSON.stringify({
+                                    old_password: profileForm.value.old_password,
+                                    new_password: profileForm.value.new_password,
+                                }),
+                            });
+                            if (pwdRes.ok) {
+                                showToast('密码已更新，请重新登录', 'success');
+                                setTimeout(() => logout(), 1500);
+                            } else {
+                                const data = await pwdRes.json().catch(() => ({}));
+                                showToast(data.detail || '密码修改失败', 'error');
+                            }
+                        }
+                        closeProfileModal();
+                    } catch (err) {
+                        showToast('保存失败：' + err.message, 'error');
+                    } finally {
+                        profileSaving.value = false;
+                    }
+                }
+
+                function handleAvatarUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    if (!file.type.startsWith('image/')) {
+                        showToast('请选择图片文件', 'error');
+                        return;
+                    }
+                    if (file.size > 2 * 1024 * 1024) {
+                        showToast('头像不能超过 2MB', 'error');
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        profileForm.value.avatar = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+
+                function applyTheme(theme) {
+                    document.documentElement.setAttribute('data-theme', theme);
+                    cache.set('theme', theme);
+                }
+
+                async function saveSettings() {
+                    settingsSaving.value = true;
+                    try {
+                        // 保存主题到后端
+                        await fetch(`${API_BASE}/api/users/${user.value.id}/theme`, {
+                            method: 'PUT',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ theme: settingsForm.value.theme }),
+                        });
+                        // 保存 MCP 配置到后端
+                        await fetch(`${API_BASE}/api/users/${user.value.id}/mcp`, {
+                            method: 'PUT',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ mcp_servers: settingsForm.value.mcp_servers }),
+                        });
+                        // 本地缓存
+                        cache.set('theme', settingsForm.value.theme);
+                        cache.set('mcp_servers', settingsForm.value.mcp_servers);
+                        applyTheme(settingsForm.value.theme);
+                        showToast('设置已保存', 'success');
+                        closeSettingsModal();
+                    } catch (err) {
+                        showToast('保存失败：' + err.message, 'error');
+                    } finally {
+                        settingsSaving.value = false;
+                    }
+                }
+
+                function toggleUploadMenu() {
+                    uploadMenuOpen.value = !uploadMenuOpen.value;
+                    if (uploadMenuOpen.value) userMenuOpen.value = false;
+                }
+
+                async function handleFileUpload(event) {
+                    const files = event.target.files;
+                    if (!files || files.length === 0) return;
+                    uploadMenuOpen.value = false;
+
+                    for (const file of files) {
+                        if (file.size > 10 * 1024 * 1024) {
+                            showToast(`文件 ${file.name} 超过 10MB，已跳过`, 'error');
+                            continue;
+                        }
+                        try {
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            if (currentThreadId.value) {
+                                formData.append('thread_id', currentThreadId.value);
+                            }
+                            const res = await fetch(`${API_BASE}/api/chat/upload`, {
+                                method: 'POST',
+                                headers: authHeaders({}),
+                                body: formData,
+                            });
+                            if (res.ok) {
+                                const data = await res.json();
+                                uploadedFiles.value.push({
+                                    name: file.name,
+                                    size: file.size,
+                                    file_id: data.data?.file_id,
+                                });
+                                showToast(`文件 ${file.name} 上传成功`, 'success');
+                            } else {
+                                const data = await res.json().catch(() => ({}));
+                                showToast(data.detail || `文件 ${file.name} 上传失败`, 'error');
+                            }
+                        } catch (err) {
+                            showToast(`文件 ${file.name} 上传失败：${err.message}`, 'error');
+                        }
+                    }
+                    // 清空 input，允许重复上传同一文件
+                    if (fileInput.value) fileInput.value.value = '';
+                }
+
+                function removeUploadedFile(index) {
+                    uploadedFiles.value.splice(index, 1);
+                }
+
+                function stopResponse() {
+                    if (abortController.value) {
+                        abortController.value.abort();
+                        abortController.value = null;
+                    }
+                    isLoading.value = false;
+                    streaming.value = false;
+                    showToast('已停止回复', 'info');
+                }
+
+                // 点击外部关闭菜单
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.user-menu-wrapper')) {
+                        userMenuOpen.value = false;
+                        uploadMenuOpen.value = false;
+                    }
+                });
+
+                // 初始化主题
+                const savedTheme = cache.get('theme') || 'default';
+                if (savedTheme !== 'default') {
+                    applyTheme(savedTheme);
+                }
+
                 onUnmounted(() => {
                     if (healthTimer) clearInterval(healthTimer);
                 });
@@ -2254,12 +3213,21 @@
                 return {
                     user, sessions, currentThreadId, messages, inputText,
                     isLoading, streaming, sidebarOpen, healthStatus, healthText,
-                    messagesContainer, textarea, quickQuestions,
+                    messagesContainer, textarea, fileInput, quickQuestions,
                     currentSessionTitle, userAvatar, greetingName, canSend,
                     createNewSession, switchSession, deleteSession,
                     clearCurrentChat, sendMessage, sendQuick,
                     handleKeydown, autoResize, openSidebar, closeSidebar,
-                    logout, escapeHtml
+                    logout, escapeHtml,
+                    // 新增
+                    userMenuOpen, uploadMenuOpen, profileModalOpen, settingsModalOpen,
+                    profileForm, settingsForm, profileSaving, settingsSaving,
+                    uploadedFiles, themes,
+                    toggleUserMenu, openProfileModal, closeProfileModal,
+                    openSettingsModal, closeSettingsModal, saveProfile,
+                    handleAvatarUpload, saveSettings, applyTheme,
+                    toggleUploadMenu, handleFileUpload, removeUploadedFile,
+                    stopResponse,
                 };
             }
         };

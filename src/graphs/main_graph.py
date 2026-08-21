@@ -129,8 +129,10 @@ def build_main_graph(retrieve_graph,
         # 短期记忆：checkpointer 按 thread_id 恢复的历史对话
         history = state.get("messages", [])
 
-        # 组装消息：系统提示（含长期记忆）+ 历史对话 + 检索资料与当前问题
-        system_content = system_prompt
+        # 组装消息：用户级 system prompt（基础默认 + 用户自定义）+ 长期记忆 + 历史对话 + 检索资料
+        # get_user_system_prompt 内部从 MySQL user_profile 表按 user_id 读取用户自定义内容
+        from init import get_user_system_prompt
+        system_content = get_user_system_prompt(user_id, system_prompt)
         if long_term and long_term != "（暂无档案）":
             system_content += f"\n\n【用户长期记忆】\n{long_term}"
 

@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -11,9 +10,13 @@ from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
 from mcp_client.client import init_mcp_holders
 from schemas.request_schemas.chat_schema import ChatRequest
 from schemas.request_schemas.login_schema import *
+from schemas.request_schemas.user_schema import ProfileUpdateRequest, PasswordUpdateRequest, SystemPromptUpdateRequest, \
+    ThemeUpdateRequest, McpConfigUpdateRequest
 from service.cache_service import cache_service
 from service.chat_service import chat_service
-from fastapi import Depends, FastAPI, HTTPException
+from service.user_profile_service import user_profile_service
+from service.file_upload_service import file_upload_service
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from mcp_client.mcp_server.agent_server import mcp
 from service.login_service import login_service
@@ -46,6 +49,8 @@ async def lifespan(app: FastAPI):
     chat_service.open(mcp_tools)
     login_service.open()
     cache_service.open()
+    user_profile_service.open()
+    file_upload_service.open()
     logger.success("资源初始化完成")
     yield                                # ===== 应用运行期间（yield 挂起）=====
     # ===== 关闭阶段：yield 之后 =====
@@ -56,6 +61,8 @@ async def lifespan(app: FastAPI):
     chat_service.close(timeout=10)
     login_service.close(timeout=10)
     cache_service.close()
+    user_profile_service.close()
+    file_upload_service.close()
     logger.info("资源已释放")
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
@@ -96,7 +103,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(exc: HTTPException):
     """HTTPException 统一包装为 {ok, detail} 格式，与业务接口响应风格一致。"""
     return FastAPIJSONResponse(
         status_code=exc.status_code,
@@ -235,6 +242,170 @@ def recover(request_body: RecoverRequest):
         return Response.success()
     else:
         return Response.failed(response)
+
+
+
+@app.get("/api/users/{user_id}/profile")
+def get_user_profile(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
+    """获取用户个人信息（username, avatar, assistant_style, theme）。"""
+    profile = user_profile_service.get_profile(user_id)
+    # 不返回 system_prompt 和 mcp_config（有专门接口），避免大字段
+    if profile:
+        return {
+            "ok": True,
+            "data": {
+                "user_id": profile.get("user_id"),
+                "username": profile.get("username"),
+                "avatar": profile.get("avatar"),
+                "assistant_style": profile.get("assistant_style"),
+                "theme": profile.get("theme", "default"),
+            }
+        }
+    return {"ok": True, "data": None}
+
+
+@app.put("/api/users/{user_id}/profile")
+def update_user_profile(user_id: str, request_body: ProfileUpdateRequest,
+                        current_user: TokenData = Depends(require_self_or_admin)):
+    """更新用户个人信息（username, avatar, assistant_style）。"""
+    success = user_profile_service.update_basic_info(
+        user_id=user_id,
+        username=request_body.username,
+        avatar=request_body.avatar,
+        assistant_style=request_body.assistant_style,
+    )
+    if success:
+        return Response.success("个人信息更新成功")
+    return Response.failed("没有需要更新的字段")
+
+
+@app.put("/api/users/{user_id}/password")
+def update_user_password(user_id: str, request_body: PasswordUpdateRequest,
+                         current_user: TokenData = Depends(require_self_or_admin)):
+    """修改用户密码（需验证原密码）。"""
+    # 先验证原密码
+    user_info = login_service.login(user_id, request_body.old_password)
+    if not isinstance(user_info, dict):
+        return Response.failed("原密码错误")
+    # 修改密码（复用 recover 逻辑）
+    result = login_service.recover(user_id, request_body.new_password)
+    if result == 1:
+        return Response.success("密码修改成功")
+    return Response.failed(result or "密码修改失败")
+
+
+@app.get("/api/users/{user_id}/system-prompt")
+def get_user_system_prompt_api(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
+    """获取用户自定义 system prompt。"""
+    content = user_profile_service.get_system_prompt(user_id)
+    return {"ok": True, "data": {"content": content or ""}}
+
+
+@app.put("/api/users/{user_id}/system-prompt")
+def update_user_system_prompt(user_id: str, request_body: SystemPromptUpdateRequest,
+                               current_user: TokenData = Depends(require_self_or_admin)):
+    """更新用户自定义 system prompt（空字符串表示清除）。"""
+    # 字数限制：最多 3000 字
+    if len(request_body.content) > 3000:
+        return Response.failed("自定义设定不能超过 3000 字")
+    user_profile_service.update_system_prompt(user_id, request_body.content)
+    return Response.success("自定义设定更新成功")
+
+
+@app.get("/api/users/{user_id}/theme")
+def get_user_theme(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
+    """获取用户主题配置。"""
+    theme = user_profile_service.get_theme(user_id)
+    return {"ok": True, "data": {"theme": theme}}
+
+
+@app.put("/api/users/{user_id}/theme")
+def update_user_theme(user_id: str, request_body: ThemeUpdateRequest,
+                      current_user: TokenData = Depends(require_self_or_admin)):
+    """更新用户主题配置。"""
+    allowed_themes = ["default", "dark", "ocean", "sunset", "forest", "lavender"]
+    if request_body.theme not in allowed_themes:
+        return Response.failed(f"不支持的主题，可选：{', '.join(allowed_themes)}")
+    user_profile_service.update_theme(user_id, request_body.theme)
+    return Response.success("主题更新成功")
+
+
+@app.get("/api/users/{user_id}/mcp")
+def get_user_mcp_config(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
+    """获取用户 MCP 服务器配置。"""
+    config = user_profile_service.get_mcp_config(user_id)
+    return {"ok": True, "data": {"mcp_servers": config}}
+
+
+@app.put("/api/users/{user_id}/mcp")
+def update_user_mcp_config(user_id: str, request_body: McpConfigUpdateRequest,
+                            current_user: TokenData = Depends(require_self_or_admin)):
+    """更新用户 MCP 服务器配置（JSON 数组，每个元素是一个 dict）。"""
+    try:
+        user_profile_service.update_mcp_config(user_id, request_body.mcp_servers)
+        return Response.success("MCP 配置更新成功")
+    except (ValueError, TypeError) as e:
+        return Response.failed(f"MCP 配置格式错误：{e}")
+
+
+# ============================================================
+# 文件上传接口
+# ============================================================
+@app.post("/api/chat/upload")
+async def upload_file(file: UploadFile = File(...),
+                      thread_id: Optional[str] = Form(None),
+                      current_user: TokenData = Depends(get_current_user)):
+    """上传文件（多种格式，base64 存储在 MySQL）。
+
+    Args:
+        file: 上传的文件
+        thread_id: 关联会话 ID（可选，None 表示全局文件）
+    """
+    content = await file.read()
+    try:
+        result = file_upload_service.save_file(
+            user_id=str(current_user.user_id),
+            file_name=file.filename,
+            file_content_bytes=content,
+            file_type=file.content_type,
+            thread_id=thread_id,
+        )
+        return {"ok": True, "data": result}
+    except ValueError as e:
+        return Response.failed(str(e))
+
+
+@app.get("/api/users/{user_id}/files")
+def list_user_files(user_id: str, thread_id: Optional[str] = None,
+                     current_user: TokenData = Depends(require_self_or_admin)):
+    """列出用户上传的文件。"""
+    files = file_upload_service.list_files(user_id, thread_id)
+    return {"ok": True, "data": files}
+
+
+@app.delete("/api/files/{file_id}")
+def delete_user_file(file_id: int, current_user: TokenData = Depends(get_current_user)):
+    """删除用户上传的文件。"""
+    success = file_upload_service.delete_file(file_id, str(current_user.user_id))
+    if success:
+        return Response.success("文件删除成功")
+    return Response.failed("文件不存在或无权删除")
+
+
+# ============================================================
+# 停止回复接口（前端暂停按钮调用）
+# 注意：LangGraph 同步 stream 无法在服务端主动中断，
+# 此接口用于前端标记停止状态，前端通过关闭 EventSource/AbortController 停止接收
+# ============================================================
+@app.post("/api/chat/{thread_id}/stop")
+def stop_chat_response(thread_id: str, current_user: TokenData = Depends(get_current_user)):
+    """标记停止当前会话的回复生成。
+
+    实际停止由前端通过 AbortController 关闭 SSE 连接实现，
+    此接口用于记录停止状态和后续可能的服务端清理。
+    """
+    logger.info(f"用户请求停止回复 thread_id={thread_id}, user_id={current_user.user_id}")
+    return {"ok": True, "message": "已标记停止，前端将关闭连接"}
 
 
 # ===== 前端静态托管（开发模式：localhost:8000 直达页面，免 Nginx）=====

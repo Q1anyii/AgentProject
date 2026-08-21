@@ -43,6 +43,13 @@ prompt_file = os.path.join(
 )
 loader = TextLoader(prompt_file, encoding="utf-8")
 system_prompt = loader.load()[0].page_content
+def get_effective_system_prompt(base_prompt: str, user_id: str, store) -> str:
+    """组装用户级 system prompt：基础 + 用户全局自定义"""
+    item = store.get(("user_global", user_id), "custom_prompt")
+    if item and item.value.get("content"):
+        return f"{base_prompt}\n\n【用户自定义设定】\n{item.value['content']}"
+    return base_prompt
+
 
 def online_rerank(query: str, documents: list[str], top_n: int = 10) -> list[dict]:
     """调用 SiliconFlow 在线重排，返回按相关性降序的 [{index, relevance_score}, ...]"""
@@ -93,3 +100,36 @@ class CustomPostgresSaver(PostgresSaver):
 if __name__ =="__main__":
     resp = model.invoke("简单介绍一下自己")
     print(resp.content)
+
+
+# ============================================================
+# 用户级 System Prompt 组装
+# 作用：基础 system_prompt + 用户自定义内容（从 MySQL user_profile 表读取）
+# 调用方：main_graph.py llm_node，每次对话时按 user_id 动态组装
+# ============================================================
+
+def get_user_system_prompt(user_id: str, base_prompt: str = None) -> str:
+    """组装用户级 system prompt：基础默认 + 用户自定义内容。
+
+    Args:
+        user_id: 用户 ID
+        base_prompt: 基础 system prompt，默认使用模块级 system_prompt
+
+    Returns:
+        组装后的 system prompt 字符串
+    """
+    if base_prompt is None:
+        base_prompt = system_prompt
+
+    # 延迟导入避免循环依赖
+    try:
+        from service.user_profile_service import user_profile_service
+        custom_prompt = user_profile_service.get_system_prompt(user_id)
+        if custom_prompt and custom_prompt.strip():
+            return f"{base_prompt}\n\n【用户自定义设定】\n{custom_prompt.strip()}"
+    except Exception as e:
+        # 获取用户自定义内容失败时，降级使用基础 prompt，不影响对话
+        from loguru import logger
+        logger.warning(f"获取用户自定义 system prompt 失败 user_id={user_id}: {e}，使用基础 prompt")
+
+    return base_prompt
