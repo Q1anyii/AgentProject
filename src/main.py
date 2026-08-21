@@ -5,25 +5,24 @@ from pathlib import Path
 
 from loguru import logger
 
-from config import validate_config, get_env_int
+from config import validate_config, get_env_int, load_mcp_server_configs
 from context.user_context import CtxUser
 from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
+from mcp_client.client import init_mcp_holders
 from schemas.request_schemas.chat_schema import ChatRequest
 from schemas.request_schemas.login_schema import *
 from service.cache_service import cache_service
-from service.chat_service import ChatService
+from service.chat_service import chat_service
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
-
-from service.login_service import LoginService
+from mcp_client.mcp_server.agent_server import mcp
+from service.login_service import login_service
 from utils.response_util import Response
 from utils.jwt_utils import get_current_user, create_access_token, create_refresh_token, TokenData, \
     REFRESH_TOKEN_EXPIRE_DAYS
 
 # 注意：.env 加载由 config.py 统一处理，无需重复 load_dotenv()
 
-chat_service = ChatService()
-login_service = LoginService()
 
 """
 
@@ -32,27 +31,38 @@ login_service = LoginService()
 """
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     # ===== 启动阶段：yield 之前 =====
     # 第一步：校验必填环境变量，缺失时直接报错（快速失败，不拖到首个请求才 500）
     validate_config()
-
+    mcp_holders = await init_mcp_holders(load_mcp_server_configs())
+    mcp_tools = [t for h in mcp_holders for t in h.tools]
+    if mcp_tools:
+        logger.success(f"已加载 MCP 工具：{[t.name for t in mcp_tools]}")
     logger.info("正在初始化 LangGraph 资源...")
-    chat_service.open()
+    chat_service.open(mcp_tools)
     login_service.open()
     cache_service.open()
-    logger.info("资源初始化完成")
+    logger.success("资源初始化完成")
     yield                                # ===== 应用运行期间（yield 挂起）=====
     # ===== 关闭阶段：yield 之后 =====
     logger.info("正在释放资源...")
+    # MCP 子进程连接需在服务关闭前释放（工具闭包依赖 session）
+    for holder in mcp_holders:
+        await holder.close()
     chat_service.close(timeout=10)
     login_service.close(timeout=10)
     cache_service.close()
     logger.info("资源已释放")
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
+
+# 挂载 MCP 服务器端点（fastmcp 3.x：http_app 返回 Starlette app，2.x 的 streamable_http_app 已改名）
+# 外部 MCP 客户端（Claude Desktop 等）通过 http://localhost:8000/mcp 调用 agent 能力
+app.mount("/mcp", mcp.http_app())
 
 # 注册请求限流中间件（对 /api/chat/ 等消耗 LLM 配额的接口限流）
 from middleware.rate_limit_middleware import RateLimitMiddleware

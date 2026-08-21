@@ -4,7 +4,9 @@
 # 使用：在 main.py 启动时调用 validate_config() 校验必填项
 # ============================================================
 
+import json
 import os
+from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 from loguru import logger
@@ -130,3 +132,58 @@ def print_config_summary() -> None:
         else:
             logger.warning(f"  {key}: 未配置")
     logger.info("================")
+
+def load_mcp_server_configs() -> list[dict]:
+    """加载 MCP 服务器配置列表（供 mcp_client.init_mcp_holders 连接外部 MCP 服务器）。
+
+    从环境变量 MCP_SERVERS 读取 JSON 数组，每项支持：
+      - type: "stdio"（默认）或 "sse"
+      - stdio: command（可执行文件）、args、cwd、env
+      - sse: url
+    cwd 若为相对路径，按项目根目录解析为绝对路径（与 .env 中
+    "src/mcp_server" 这类写法一致，不受进程工作目录影响）。
+
+    Returns:
+        校验通过的配置列表；环境变量缺失 / JSON 解析失败 / 无有效条目时返回空列表。
+        MCP 是可选项，配置错误不阻塞应用启动，单条无效只跳过该条。
+    """
+    raw = os.getenv("MCP_SERVERS")
+    if not raw or not raw.strip():
+        logger.info("未配置 MCP_SERVERS，跳过 MCP 工具加载")
+        return []
+    try:
+        servers = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"MCP_SERVERS 不是合法 JSON，跳过 MCP 工具加载：{e}")
+        return []
+    if not isinstance(servers, list):
+        logger.warning("MCP_SERVERS 应为 JSON 数组，跳过 MCP 工具加载")
+        return []
+
+    project_root = Path(__file__).resolve().parent.parent
+    validated = []
+    for cfg in servers:
+        if not isinstance(cfg, dict):
+            logger.warning(f"忽略无效的 MCP 服务器配置项（非对象）：{cfg}")
+            continue
+        server_type = cfg.get("type", "stdio")
+        if server_type == "stdio":
+            if not cfg.get("command"):
+                logger.warning(f"忽略 MCP 服务器配置项（stdio 缺少 command）：{cfg}")
+                continue
+            cwd = cfg.get("cwd")
+            if cwd and not Path(cwd).is_absolute():
+                cwd = str(project_root / cwd)
+            item = {**cfg, "type": "stdio", "cwd": cwd}
+        elif server_type == "sse":
+            if not cfg.get("url"):
+                logger.warning(f"忽略 MCP 服务器配置项（sse 缺少 url）：{cfg}")
+                continue
+            item = {**cfg, "type": "sse"}
+        else:
+            logger.warning(f"忽略 MCP 服务器配置项（不支持的 type={server_type}）：{cfg}")
+            continue
+        validated.append(item)
+    logger.info(f"MCP 服务器配置加载完成，共 {len(validated)} 个："
+                f"{[c.get('name', c.get('type')) for c in validated]}")
+    return validated

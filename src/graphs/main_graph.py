@@ -23,16 +23,14 @@ from utils.doc_util import documents_to_dicts
 from constant.prompt_constants import MEMORY_EXTRACT_PROMPT, CLASSIFIER_PROMPT, NO_INFO_MARKS
 
 
-def build_main_graph(self: "ChatService"):  # ← 原 build_chat_graph 逻辑整体搬入
+def build_main_graph(self, mcp_tools: list | None = None):
 
-    # 复用 ChatService.open() 已构建的 retrieve_graph（闭包已捕获 self.collection，
-    # Redis 缓存用全局单例 cache_service），避免重复 build 产生双份图对象；兜底：独立调用时仍可自行构建
     retrieve_graph = self.retrieve_graph or build_retrieve_graph(self=self)
 
     # 工具：LLM 需要时可调用（用户信息/会话总结），工具通过请求级上下文读取数据
-    tools = build_tool_graph()
+    tools = build_tool_graph(mcp_tools)  # 原 build_tool_graph() 调用点替换
     tool_node = ToolNode(tools)
-    model_with_tools = model.bind_tools(tools)
+    model_with_tools = model.bind_tools(tools)  # ← 原 build_chat_graph 逻辑整体搬入
 
     class OverAllState(MessagesState):
         input_str: Annotated[str, Field(description="用户输入")]

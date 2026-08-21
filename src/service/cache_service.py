@@ -122,7 +122,6 @@ class CacheService:
             "result": json.dumps(serializable_result, ensure_ascii=False),
             "created_at": time.time()
         })
-        logger.info(f"{key}已存储")
         self.redis.expire(key, self.cache_ttl)
 
     def query_cache(self, thread_id: str, query: str, top_k: int = 3) -> List[Document] | None:

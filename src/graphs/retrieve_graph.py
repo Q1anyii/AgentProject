@@ -59,7 +59,7 @@ def build_retrieve_graph(self: "ChatService"):  # ← 原 query_rerank_graph 逻
         thread_id = config["configurable"].get("thread_id", None)
         query_in_cache = cache_service.query_cache(thread_id, question, 3)
         if query_in_cache:
-            logger.info("缓存命中，直接返回")
+            logger.success("缓存命中，直接返回")
             return {"reranked_docs": query_in_cache, "cache_hit": True}
         return {"cache_hit": False}
 

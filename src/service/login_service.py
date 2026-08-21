@@ -189,6 +189,7 @@ class LoginService:
         finally:
             conn.close()
 
+login_service = LoginService()
 
 # ---------------- 业务示例 登录查询用户 ----------------
 if __name__ == "__main__":

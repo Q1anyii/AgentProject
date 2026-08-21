@@ -33,7 +33,7 @@ class ChatService:
         self.cache = None
         self.redis_client = None
 
-    def open(self):
+    def open(self, mcp_tools: list | None = None):
         from init import embedding_function
         self.client = chromadb.PersistentClient(path=str(self.persist_path))
         self.collection = self.client.get_collection(
@@ -60,7 +60,8 @@ class ChatService:
         self.store.setup()
         self.cache = RedisCache(cache_service.redis)  # ← self.，且 compile 用它
         self.retrieve_graph = build_retrieve_graph(self)  # 只 build 一次，替代 @lru_cache
-        self.main_graph = build_main_graph(self)
+        self.main_graph = build_main_graph(self, mcp_tools=mcp_tools)
+
 
     def close(self, timeout:int =10):
         if self.pool:
@@ -256,6 +257,6 @@ class ChatService:
             logger.error(f"数据库不可用: {e}")
             return {"status": "degraded", "db": False}
 
-
+chat_service = ChatService()
 
 

@@ -33,9 +33,9 @@ langgraph-cli[inmem]==0.4.30
 # MCP / FastMCP 集成
 # 作用：构建 MCP Server、连接 MCP 工具、资源、Prompt
 # =========================================================
-mcp==1.27.0
-fastmcp==3.2.4
-langchain-mcp-adapters==0.2.1
+mcp>=1.27.0
+fastmcp>=3.2.4
+langchain-mcp-adapters>=0.2
 
 
 # =========================================================
