@@ -1,1 +1,71 @@
-[]
+[
+  {
+    "name": "filesystem",
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "E:/工作文件/AgentProject"
+    ],
+    "cwd": "E:/工作文件/AgentProject"
+  },
+  {
+    "name": "git",
+    "type": "stdio",
+    "command": "uvx",
+    "args": [
+      "mcp-server-git",
+      "--repository",
+      "E:/工作文件/AgentProject"
+    ],
+    "cwd": "E:/工作文件/AgentProject"
+  },
+  {
+    "name": "fetch",
+    "type": "stdio",
+    "command": "uvx",
+    "args": [
+      "mcp-server-fetch"
+    ]
+  },
+  {
+    "name": "sqlite",
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "mcp-server-sqlite",
+      "--db",
+      "E:/工作文件/AgentProject/resources/local_data.db"
+    ],
+    "cwd": "E:/工作文件/AgentProject"
+  },
+  {
+    "name": "sequential-thinking",
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-sequential-thinking"
+    ]
+  },
+  {
+    "name": "memory",
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-memory"
+    ],
+    "cwd": "E:/工作文件/AgentProject/resources/mcp_memory"
+  },
+  {
+    "name": "crawl4ai",
+    "type": "stdio",
+    "command": "uvx",
+    "args": [
+      "crawl-mcp"
+    ]
+  }
+]

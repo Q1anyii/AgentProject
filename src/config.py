@@ -186,7 +186,8 @@ def load_mcp_server_configs() -> list[dict]:
             logger.warning(f"忽略 MCP 服务器配置项（不支持的 type={server_type}）：{cfg}")
             continue
         validated.append(item)
-    logger.info(f"MCP 服务器配置加载完成（路径: {config_path}），共 {len(validated)} 个："
+        # （路径: {config_path}）
+    logger.info(f"MCP 服务器配置加载完成，共 {len(validated)} 个："
                 f"{[c.get('name', c.get('type')) for c in validated]}")
     _mcp_config_cache = validated
     return validated

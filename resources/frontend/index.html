@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mitta AI — 智能助理</title>
     <link rel="icon" href="favicon.png">
-    <!-- 字体：Space Grotesk（现代几何感标题）+ Inter（清晰正文） -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+    <!-- 字体：移除 Google Fonts 外链（fonts.googleapis.com 在国内网络下经常挂起，
+         <link rel="stylesheet"> 是渲染阻塞资源，会导致页面长时间空白转圈），
+         字体栈自动回退到系统字体（见 :root 的 --font-display / --font-body） -->
     <!-- Vue 3 + Vue Router CDN（主源 jsdelivr，备源 unpkg/bootcdn，按顺序加载） -->
     <script>
         // CDN 加载失败检测与回退：按顺序尝试多个源
@@ -129,8 +128,10 @@
             --shadow-md: 0 8px 24px rgba(26, 26, 25, 0.08);
             --shadow-lg: 0 16px 40px rgba(26, 26, 25, 0.12);
 
-            --font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            /* 系统字体栈：不再依赖 Google Fonts 外链（渲染阻塞 + 国内网络不可达），
+               中文回退到系统黑体（PingFang SC / Microsoft YaHei） */
+            --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
 
             --sidebar-width: 300px;
             --header-height: 68px;
@@ -2503,7 +2504,7 @@
 
                     <!-- ===== 个人信息弹窗 ===== -->
                     <div v-if="profileModalOpen" class="modal-overlay" @click.self="closeProfileModal">
-                        <div class="modal">
+                        <div class="modal" @mousedown.stop>
                             <div class="modal-header">
                                 <h3>个人信息</h3>
                                 <button class="modal-close" @click="closeProfileModal" aria-label="关闭">
@@ -2565,7 +2566,7 @@
 
                     <!-- ===== 系统设置弹窗 ===== -->
                     <div v-if="settingsModalOpen" class="modal-overlay" @click.self="closeSettingsModal">
-                        <div class="modal">
+                        <div class="modal" @mousedown.stop>
                             <div class="modal-header">
                                 <h3>系统设置</h3>
                                 <button class="modal-close" @click="closeSettingsModal" aria-label="关闭">
@@ -2626,7 +2627,7 @@
 
                     <!-- ===== MCP 重启提示弹窗 ===== -->
                     <div v-if="restartNoticeOpen" class="modal-overlay" @click.self="restartNoticeOpen = false">
-                        <div class="modal" style="max-width: 480px;">
+                        <div class="modal" @mousedown.stop style="max-width: 480px;">
                             <div class="modal-header">
                                 <h3>配置已保存</h3>
                                 <button class="modal-close" @click="restartNoticeOpen = false" aria-label="关闭">

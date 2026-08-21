@@ -18,6 +18,8 @@ MCP客户端管理层
 """
 
 import asyncio
+import os
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +63,37 @@ class McpServerConnection:
         self.tools: list[BaseTool] = []          # LangChain 工具（供图 bind_tools / ToolNode）
         self.holders: list[McpToolHolder] = []   # 按工具的统一调用封装（可选）
 
+    @staticmethod
+    def _build_env(extra: dict[str, str]) -> dict[str, str]:
+        """构造子进程环境：继承父进程全部环境变量，并把解释器同目录的 Scripts
+        （conda/venv 下的 uvx.exe、pip.exe 等）注入 PATH 最前。
+
+        注意：该注入不影响 CreateProcess 的可执行文件搜索（它按父进程 PATH
+        搜），只影响子进程内部再启动命令时的解析；命令本身能否启动由
+        _resolve_command 用绝对路径保证。
+        """
+        env = dict(os.environ)
+        env.update(extra)
+        scripts = str(Path(sys.executable).resolve().parent / "Scripts")
+        if scripts not in env.get("PATH", "").split(os.pathsep):
+            env["PATH"] = scripts + os.pathsep + env.get("PATH", "")
+        return env
+
+    @staticmethod
+    def _resolve_command(command: str) -> str:
+        """解析启动命令：Windows 下 CreateProcess 按父进程 PATH 搜索可执行文件
+        （env 里的 PATH 不影响搜索），PyCharm/未激活终端里 conda Scripts 不在
+        PATH，裸命令 uvx 会 WinError 2。若命令在解释器 Scripts 目录存在，
+        补全为绝对路径。
+        """
+        if os.name != "nt" or os.path.isabs(command):
+            return command
+        scripts = Path(sys.executable).resolve().parent / "Scripts"
+        for candidate in (scripts / command, scripts / f"{command}.exe"):
+            if candidate.is_file():
+                return str(candidate)
+        return command
+
     async def open(self) -> None:
         """建立连接、初始化会话并加载全部工具。
 
@@ -70,15 +103,18 @@ class McpServerConnection:
         server_type = self.cfg.get("type", "stdio")
         if server_type == "stdio":
             params = StdioServerParameters(
-                command=self.cfg["command"],
+                command=self._resolve_command(self.cfg["command"]),
                 args=self.cfg.get("args", []),
                 cwd=self.cfg.get("cwd"),
-                env=self.cfg.get("env"),
+                env=self._build_env(self.cfg.get("env") or {}),
             )
             # 预检：服务器脚本必须存在。避免子进程启动失败触发 mcp 库在
             # Windows 上的取消作用域泄漏 bug（anyio cancel scope 跨任务退出），
             # 该 bug 会污染同一事件循环中后续服务器的连接
-            if params.args and not params.args[0].startswith("-"):
+            # 注意：只对 python/python3/py 等直接运行脚本的命令做检查；
+            # uvx/npx/pipx 等包管理器的 args[0] 是包名，不是本地脚本路径
+            _SCRIPT_RUNNERS = {"python", "python3", "py"}
+            if params.command in _SCRIPT_RUNNERS and params.args and not params.args[0].startswith("-"):
                 script = Path(params.cwd or ".") / params.args[0]
                 if not script.exists():
                     raise ConnectionError(f"MCP 服务器脚本不存在：{script}")
@@ -110,7 +146,6 @@ class McpServerConnection:
                 session=session,
                 server_name=self.cfg.get("name", server_type),
             ))
-        logger.info(f"MCP 服务器 [{self.cfg.get('name', server_type)}] 已连接，工具：{[t.name for t in self.tools]}")
 
     async def _enter_context(self, cm) -> Any:
         """进入 async 上下文管理器并登记到退出栈；进入失败时显式关闭底层生成器。
@@ -135,8 +170,15 @@ class McpServerConnection:
             raise
 
     async def close(self) -> None:
-        """按启动逆序释放连接（先关会话再关传输）"""
-        await self._stack.aclose()
+        """按启动逆序释放连接（先关会话再关传输）。
+
+        mcp SDK 在 Windows asyncio 下关闭 stdio 传输时可能抛 cancel scope
+        相关 RuntimeError（库已知问题），关闭失败连接已无可用性，吞掉即可。
+        """
+        try:
+            await self._stack.aclose()
+        except BaseException:
+            pass
 
 
 async def init_mcp_holders(servers: list[dict[str, Any]], timeout: int = 15) -> list[McpServerConnection]:
@@ -154,24 +196,38 @@ async def init_mcp_holders(servers: list[dict[str, Any]], timeout: int = 15) -> 
         timeout: 单个服务器连接超时时间（秒），默认 15 秒。
                  防止 MCP 服务器启动后 stdio 通信无响应时阻塞整个后端启动。
     """
-    connections: list[McpServerConnection] = []
-    for cfg in servers:
+    async def _connect_one(cfg: dict[str, Any]) -> McpServerConnection | None:
+        """连接单个服务器（每个连接在独立 task 中执行）。
+
+        必须在独立 task 里调用 open()：mcp 库 stdio_client 的 anyio cancel
+        scope 归属创建它的 task，Windows 下子进程快速失败时 scope 跨任务退出
+        泄漏的取消只作用于本任务（已失败，无影响），不会像顺序版那样注入到
+        后续连接的 await 点甚至 lifespan 协程。
+        """
         server_name = cfg.get('name', cfg.get('type', 'unknown'))
+        conn = McpServerConnection(cfg)
         try:
-            conn = McpServerConnection(cfg)
             # 超时保护：单个 MCP 服务器连接超时后跳过，不阻塞主流程
             await asyncio.wait_for(conn.open(), timeout=timeout)
-            connections.append(conn)
+            return conn
         except asyncio.TimeoutError:
             logger.warning(
                 f"MCP 服务器 [{server_name}] 连接超时（{timeout}s），已跳过。"
                 f"请检查该服务器是否能正常响应 stdio 通信。"
             )
-        except Exception as e:
+        except (Exception, asyncio.CancelledError) as e:
+            # 必须捕获 CancelledError：mcp 库泄漏的取消会异步注入到 await 点，
+            # 捕获后降级为告警跳过，避免污染主流程（本任务隔离后即使漏网也
+            # 只影响本任务）。
             logger.warning(
                 f"MCP 服务器 [{server_name}] 连接失败，已跳过：{e}"
             )
-    return connections
+        await conn.close()   # 兜底释放 open() 已登记的部分资源
+        return None
+
+    # 并发连接全部服务器：启动更快，且单个失败被任务隔离，互不污染
+    results = await asyncio.gather(*(_connect_one(cfg) for cfg in servers))
+    return [c for c in results if c is not None]
 
 
 async def demo_call(servers: list[dict[str, Any]]) -> None:
