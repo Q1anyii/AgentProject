@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mitta AI — 智能客服</title>
+    <title>Mitta AI — 智能助理</title>
     <link rel="icon" href="favicon.png">
     <!-- 字体：Space Grotesk（现代几何感标题）+ Inter（清晰正文） -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2032,7 +2032,7 @@
                 <div class="auth-form-wrapper">
                     <div class="auth-card">
                         <h1>欢迎回来</h1>
-                        <p class="auth-subtitle">登录后继续与 Mitta 智能客服对话</p>
+                        <p class="auth-subtitle">登录后继续与 Mitta 智能助理对话</p>
                         <form @submit.prevent="handleLogin">
                             <div class="form-group">
                                 <label class="form-label">用户 ID</label>
@@ -2117,7 +2117,7 @@
                 <div class="auth-form-wrapper">
                     <div class="auth-card">
                         <h1>创建账号</h1>
-                        <p class="auth-subtitle">注册后即可体验智能客服服务</p>
+                        <p class="auth-subtitle">注册后即可体验智能助理服务</p>
                         <form @submit.prevent="handleRegister">
                             <div class="form-group">
                                 <label class="form-label">用户名</label>
@@ -2289,8 +2289,8 @@
                             <span>Mitta AI</span>
                         </div>
                         <div class="auth-quote">
-                            <h2>让每一次对话都更有价值</h2>
-                            <p>基于 LangGraph 与 RAG 技术的在线学习平台智能客服，为您提供准确、连贯、个性化的问答体验。</p>
+                            <h2>Mitta，你的元气智能助理 (๑•̀ㅂ•́)و✧</h2>
+                            <p>我是 Mitta，一名元气 AI 助理呀～基于知识库为你提供准确客观的信息，可爱只是糖衣，内核是绝对可靠的知识管家呢 (｡•̀ᴗ-)✧</p>
                         </div>
                         <div class="auth-footer">© 2026 Mitta AI. All rights reserved.</div>
                     </div>
@@ -2414,7 +2414,7 @@
                                             <line x1="12" y1="16" x2="12" y2="12"></line>
                                             <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                         </svg>
-                                        智能客服已就绪
+                                        智能助理已就绪
                                     </div>
                                     <h1>您好，{{ greetingName }}！有什么可以帮您的？</h1>
                                     <p>开始一段新的对话，或从左侧选择一个历史会话继续交流。</p>
@@ -2587,23 +2587,32 @@
                                 <!-- MCP 服务器配置 -->
                                 <div class="form-group">
                                     <label>MCP 服务器配置</label>
-                                    <div class="form-hint" style="margin-bottom: 10px;">配置 Model Context Protocol 服务器，扩展 AI 助手的工具能力（JSON 格式）</div>
-                                    <div class="mcp-list">
-                                        <div v-for="(mcp, idx) in settingsForm.mcp_servers" :key="idx" class="mcp-item">
-                                            <div class="mcp-item-header">
-                                                <span class="mcp-item-title">服务器 {{ idx + 1 }}</span>
-                                                <button class="mcp-remove" @click="settingsForm.mcp_servers.splice(idx, 1)">删除</button>
-                                            </div>
-                                            <div class="form-group" style="margin-bottom: 8px;">
-                                                <input v-model="mcp.name" type="text" placeholder="服务器名称（如：文件系统）" style="margin-bottom: 8px;">
-                                                <input v-model="mcp.command" type="text" placeholder="启动命令（如：npx）" style="margin-bottom: 8px;">
-                                                <input v-model="mcp.args" type="text" placeholder="参数（空格分隔，如：-y mcp-server-fs）">
-                                            </div>
-                                        </div>
+                                    <div class="form-hint" style="margin-bottom: 10px;">配置存储在本地 JSON 文件中，可自定义存储路径。直接粘贴 JSON 数组，每项支持 name / command / args / cwd / type(stdio|sse) / url 等字段。</div>
+                                    <!-- 配置文件路径 -->
+                                    <div style="margin-bottom: 12px;">
+                                        <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">配置文件路径</label>
+                                        <input
+                                            v-model="mcpConfigPath"
+                                            type="text"
+                                            placeholder="如：E:/工作文件/AgentProject/resources/config/mcp_servers.json"
+                                            style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: 'Consolas', monospace; background: var(--bg-secondary); color: var(--text-primary);"
+                                        >
+                                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">允许路径：项目 resources/、config/ 目录，或用户主目录下任意路径</div>
                                     </div>
-                                    <button class="btn-ghost" @click="settingsForm.mcp_servers.push({ name: '', command: '', args: '' })" style="width: 100%; margin-top: 8px;">
-                                        + 添加 MCP 服务器
-                                    </button>
+                                    <!-- JSON 配置编辑器 -->
+                                    <textarea
+                                        v-model="mcpJsonText"
+                                        class="mcp-json-editor"
+                                        placeholder='[&#10;  {&#10;    "name": "文件系统",&#10;    "command": "npx",&#10;    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed"]&#10;  }&#10;]'
+                                        rows="10"
+                                        spellcheck="false"
+                                        style="width: 100%; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); resize: vertical; line-height: 1.5;"
+                                    ></textarea>
+                                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                        <button type="button" class="btn-ghost" @click="formatMcpJson" style="flex: 1;">格式化 JSON</button>
+                                        <button type="button" class="btn-ghost" @click="clearMcpJson" style="flex: 1;">清空</button>
+                                    </div>
+                                    <div v-if="mcpJsonError" style="color: var(--error, #ff4d4f); font-size: 12px; margin-top: 6px;">{{ mcpJsonError }}</div>
                                 </div>
                             </div>
                             <div class="modal-footer">
@@ -2611,6 +2620,32 @@
                                 <button class="btn-primary" @click="saveSettings" :disabled="settingsSaving">
                                     {{ settingsSaving ? '保存中...' : '保存设置' }}
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== MCP 重启提示弹窗 ===== -->
+                    <div v-if="restartNoticeOpen" class="modal-overlay" @click.self="restartNoticeOpen = false">
+                        <div class="modal" style="max-width: 480px;">
+                            <div class="modal-header">
+                                <h3>配置已保存</h3>
+                                <button class="modal-close" @click="restartNoticeOpen = false" aria-label="关闭">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                                    <div style="flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--warning-bg, #FFF4E5); display: flex; align-items: center; justify-content: center; font-size: 20px;">⚠️</div>
+                                    <div>
+                                        <p style="margin: 0 0 10px 0; font-weight: 600;">MCP 配置需重启后端生效</p>
+                                        <p style="margin: 0 0 8px 0; color: var(--text-secondary); line-height: 1.6;">MCP 服务器在后端服务启动时初始化并编译进对话图，运行中修改配置不会自动热重载。</p>
+                                        <p style="margin: 0; color: var(--text-secondary); line-height: 1.6;">请重启后端服务（<code style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-size: 12px;">python main.py</code>）后，新配置的 MCP 工具才会在对话中生效。</p>
+                                        <p style="margin: 10px 0 0 0; color: var(--success, #52c41a); font-size: 13px;">✓ 主题配色已即时生效，无需重启。</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn-primary" @click="confirmRestartNotice">知道了</button>
                             </div>
                         </div>
                     </div>
@@ -2636,8 +2671,12 @@
                 const uploadMenuOpen = ref(false);
                 const profileModalOpen = ref(false);
                 const settingsModalOpen = ref(false);
+                const restartNoticeOpen = ref(false);
                 const profileSaving = ref(false);
                 const settingsSaving = ref(false);
+                const mcpJsonText = ref('');
+                const mcpJsonError = ref('');
+                const mcpConfigPath = ref('');
                 const uploadedFiles = ref([]);
                 const abortController = ref(null);
 
@@ -3012,12 +3051,37 @@
                     profileModalOpen.value = false;
                 }
 
-                function openSettingsModal() {
+                async function openSettingsModal() {
                     userMenuOpen.value = false;
                     // 加载当前设置
                     settingsForm.value.theme = cache.get('theme') || 'default';
-                    settingsForm.value.mcp_servers = cache.get('mcp_servers') || [];
                     settingsModalOpen.value = true;
+
+                    // 从后端全局接口加载 MCP 配置（本地文件存储）
+                    try {
+                        const res = await fetch(`${API_BASE}/api/mcp/config`, {
+                            headers: authHeaders({}),
+                        });
+                        syncTokenFromHeaders(res.headers);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.ok && data.data) {
+                                mcpConfigPath.value = data.data.path || '';
+                                settingsForm.value.mcp_servers = data.data.mcp_servers || [];
+                                try {
+                                    mcpJsonText.value = JSON.stringify(data.data.mcp_servers || [], null, 2);
+                                    mcpJsonError.value = '';
+                                } catch (e) {
+                                    mcpJsonText.value = '[]';
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        // 接口失败时回退到本地缓存
+                        settingsForm.value.mcp_servers = cache.get('mcp_servers') || [];
+                        mcpJsonText.value = JSON.stringify(settingsForm.value.mcp_servers, null, 2);
+                        console.warn('加载 MCP 配置失败，使用本地缓存:', err);
+                    }
                 }
 
                 function closeSettingsModal() {
@@ -3028,7 +3092,7 @@
                     profileSaving.value = true;
                     try {
                         // 更新基本信息
-                        const res = await fetch(`${API_BASE}/api/users/${user.value.id}/profile`, {
+                        const res = await fetch(`${API_BASE}/api/users/${user.value.userId}/profile`, {
                             method: 'PUT',
                             headers: authHeaders({ 'Content-Type': 'application/json' }),
                             body: JSON.stringify({
@@ -3057,7 +3121,7 @@
                                 showToast('新密码至少6位', 'error');
                                 return;
                             }
-                            const pwdRes = await fetch(`${API_BASE}/api/users/${user.value.id}/password`, {
+                            const pwdRes = await fetch(`${API_BASE}/api/users/${user.value.userId}/password`, {
                                 method: 'PUT',
                                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                                 body: JSON.stringify({
@@ -3107,29 +3171,118 @@
                 async function saveSettings() {
                     settingsSaving.value = true;
                     try {
+                        // 解析 MCP JSON 配置
+                        let parsedMcp = [];
+                        const mcpText = mcpJsonText.value.trim();
+                        if (mcpText) {
+                            try {
+                                parsedMcp = JSON.parse(mcpText);
+                                if (!Array.isArray(parsedMcp)) {
+                                    mcpJsonError.value = 'MCP 配置必须是 JSON 数组（[] 包裹）';
+                                    showToast('MCP 配置格式错误：必须是 JSON 数组', 'error');
+                                    return;
+                                }
+                                // 校验每项必须是对象且有 command 或 url
+                                for (let i = 0; i < parsedMcp.length; i++) {
+                                    const item = parsedMcp[i];
+                                    if (typeof item !== 'object' || item === null) {
+                                        mcpJsonError.value = `第 ${i + 1} 项必须是对象`;
+                                        showToast(`MCP 配置第 ${i + 1} 项必须是对象`, 'error');
+                                        return;
+                                    }
+                                    const type = item.type || 'stdio';
+                                    if (type === 'stdio' && !item.command) {
+                                        mcpJsonError.value = `第 ${i + 1} 项（stdio 类型）缺少 command 字段`;
+                                        showToast(`MCP 配置第 ${i + 1} 项缺少 command`, 'error');
+                                        return;
+                                    }
+                                    if (type === 'sse' && !item.url) {
+                                        mcpJsonError.value = `第 ${i + 1} 项（sse 类型）缺少 url 字段`;
+                                        showToast(`MCP 配置第 ${i + 1} 项缺少 url`, 'error');
+                                        return;
+                                    }
+                                }
+                                mcpJsonError.value = '';
+                            } catch (e) {
+                                mcpJsonError.value = 'JSON 解析失败：' + e.message;
+                                showToast('MCP 配置 JSON 解析失败：' + e.message, 'error');
+                                return;
+                            }
+                        }
+
+                        // 保存前记录原始 MCP 配置，用于判断是否需要重启提示
+                        const originalMcp = JSON.stringify(cache.get('mcp_servers') || []);
+                        const newMcp = JSON.stringify(parsedMcp);
+                        const mcpChanged = originalMcp !== newMcp;
+
                         // 保存主题到后端
-                        await fetch(`${API_BASE}/api/users/${user.value.id}/theme`, {
+                        await fetch(`${API_BASE}/api/users/${user.value.userId}/theme`, {
                             method: 'PUT',
                             headers: authHeaders({ 'Content-Type': 'application/json' }),
                             body: JSON.stringify({ theme: settingsForm.value.theme }),
                         });
-                        // 保存 MCP 配置到后端
-                        await fetch(`${API_BASE}/api/users/${user.value.id}/mcp`, {
+                        // 保存 MCP 配置到后端（全局接口，本地文件存储）
+                        const mcpRes = await fetch(`${API_BASE}/api/mcp/config`, {
                             method: 'PUT',
                             headers: authHeaders({ 'Content-Type': 'application/json' }),
-                            body: JSON.stringify({ mcp_servers: settingsForm.value.mcp_servers }),
+                            body: JSON.stringify({
+                                path: mcpConfigPath.value.trim() || undefined,
+                                mcp_servers: parsedMcp,
+                            }),
                         });
+                        syncTokenFromHeaders(mcpRes.headers);
+                        if (!mcpRes.ok) {
+                            const errData = await mcpRes.json().catch(() => ({}));
+                            throw new Error(errData.detail || errData.message || 'MCP 配置保存失败');
+                        }
                         // 本地缓存
                         cache.set('theme', settingsForm.value.theme);
-                        cache.set('mcp_servers', settingsForm.value.mcp_servers);
+                        cache.set('mcp_servers', parsedMcp);
+                        settingsForm.value.mcp_servers = parsedMcp;
                         applyTheme(settingsForm.value.theme);
-                        showToast('设置已保存', 'success');
-                        closeSettingsModal();
+
+                        // MCP 配置变更：弹出重启提示（不自动关闭设置弹窗）
+                        if (mcpChanged) {
+                            restartNoticeOpen.value = true;
+                        } else {
+                            // 仅主题变更：即时生效，直接提示成功
+                            showToast('设置已保存', 'success');
+                            closeSettingsModal();
+                        }
                     } catch (err) {
                         showToast('保存失败：' + err.message, 'error');
                     } finally {
                         settingsSaving.value = false;
                     }
+                }
+
+                function formatMcpJson() {
+                    try {
+                        const text = mcpJsonText.value.trim();
+                        if (!text) {
+                            mcpJsonText.value = '[]';
+                            mcpJsonError.value = '';
+                            return;
+                        }
+                        const parsed = JSON.parse(text);
+                        mcpJsonText.value = JSON.stringify(parsed, null, 2);
+                        mcpJsonError.value = '';
+                        showToast('JSON 格式化成功', 'success');
+                    } catch (e) {
+                        mcpJsonError.value = 'JSON 解析失败：' + e.message;
+                        showToast('JSON 格式化失败：' + e.message, 'error');
+                    }
+                }
+
+                function clearMcpJson() {
+                    mcpJsonText.value = '[]';
+                    mcpJsonError.value = '';
+                }
+
+                function confirmRestartNotice() {
+                    restartNoticeOpen.value = false;
+                    closeSettingsModal();
+                    showToast('设置已保存，重启后生效', 'success');
                 }
 
                 function toggleUploadMenu() {
@@ -3227,7 +3380,8 @@
                     openSettingsModal, closeSettingsModal, saveProfile,
                     handleAvatarUpload, saveSettings, applyTheme,
                     toggleUploadMenu, handleFileUpload, removeUploadedFile,
-                    stopResponse,
+                    stopResponse, restartNoticeOpen, confirmRestartNotice,
+                    mcpJsonText, mcpJsonError, formatMcpJson, clearMcpJson, mcpConfigPath,
                 };
             }
         };

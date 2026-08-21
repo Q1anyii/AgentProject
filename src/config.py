@@ -133,31 +133,33 @@ def print_config_summary() -> None:
             logger.warning(f"  {key}: 未配置")
     logger.info("================")
 
+_mcp_config_cache: list[dict] | None = None
+
 def load_mcp_server_configs() -> list[dict]:
     """加载 MCP 服务器配置列表（供 mcp_client.init_mcp_holders 连接外部 MCP 服务器）。
 
-    从环境变量 MCP_SERVERS 读取 JSON 数组，每项支持：
-      - type: "stdio"（默认）或 "sse"
-      - stdio: command（可执行文件）、args、cwd、env
-      - sse: url
-    cwd 若为相对路径，按项目根目录解析为绝对路径（与 .env 中
-    "src/mcp_server" 这类写法一致，不受进程工作目录影响）。
+    【架构变更】MCP 配置改为本地 JSON 文件存储，用户可在前端指定文件路径。
+    路径记录在 resources/config/.mcp_config_path 中，默认路径为 resources/config/mcp_servers.json。
+    启动时从该路径读取配置；文件不存在或解析失败时返回空列表（不阻塞启动）。
 
     Returns:
-        校验通过的配置列表；环境变量缺失 / JSON 解析失败 / 无有效条目时返回空列表。
-        MCP 是可选项，配置错误不阻塞应用启动，单条无效只跳过该条。
+        校验通过的配置列表；文件不存在 / JSON 解析失败 / 无有效条目时返回空列表。
     """
-    raw = os.getenv("MCP_SERVERS")
-    if not raw or not raw.strip():
-        logger.info("未配置 MCP_SERVERS，跳过 MCP 工具加载")
+    global _mcp_config_cache
+    if _mcp_config_cache is not None:
+        return _mcp_config_cache
+    config_path = get_mcp_config_path()
+    if not config_path or not Path(config_path).is_file():
+        logger.info(f"MCP 配置文件不存在（路径: {config_path}），跳过 MCP 工具加载")
         return []
     try:
-        servers = json.loads(raw)
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.warning(f"MCP_SERVERS 不是合法 JSON，跳过 MCP 工具加载：{e}")
+        with open(config_path, "r", encoding="utf-8") as f:
+            servers = json.load(f)
+    except (json.JSONDecodeError, TypeError, OSError) as e:
+        logger.warning(f"MCP 配置文件读取失败（路径: {config_path}）：{e}，跳过 MCP 工具加载")
         return []
     if not isinstance(servers, list):
-        logger.warning("MCP_SERVERS 应为 JSON 数组，跳过 MCP 工具加载")
+        logger.warning(f"MCP 配置文件内容不是 JSON 数组（路径: {config_path}），跳过 MCP 工具加载")
         return []
 
     project_root = Path(__file__).resolve().parent.parent
@@ -184,6 +186,142 @@ def load_mcp_server_configs() -> list[dict]:
             logger.warning(f"忽略 MCP 服务器配置项（不支持的 type={server_type}）：{cfg}")
             continue
         validated.append(item)
-    logger.info(f"MCP 服务器配置加载完成，共 {len(validated)} 个："
+    logger.info(f"MCP 服务器配置加载完成（路径: {config_path}），共 {len(validated)} 个："
                 f"{[c.get('name', c.get('type')) for c in validated]}")
+    _mcp_config_cache = validated
     return validated
+
+
+# ============================================================
+# MCP 配置文件路径管理
+# 作用：记录用户指定的 MCP 配置文件路径，读写均走该路径
+# 路径存储文件：resources/config/.mcp_config_path
+# 默认配置文件：resources/config/mcp_servers.json
+# ============================================================
+
+# 路径记录文件：存储用户指定的 MCP 配置文件路径
+_MCP_PATH_FILE = Path(__file__).resolve().parent.parent / "resources" / "config" / ".mcp_config_path"
+# 默认配置文件路径
+_DEFAULT_MCP_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "config" / "mcp_servers.json"
+# 允许的配置文件目录白名单（安全限制，防止写入系统敏感目录）
+_ALLOWED_MCP_CONFIG_DIRS = [
+    Path(__file__).resolve().parent.parent / "resources",
+    Path(__file__).resolve().parent.parent / "config",
+    Path.home() / ".mitta",
+]
+
+
+def get_mcp_config_path() -> str:
+    """获取当前 MCP 配置文件路径。
+
+    优先从路径记录文件读取；记录文件不存在或为空时返回默认路径。
+
+    Returns:
+        MCP 配置文件的绝对路径字符串
+    """
+    try:
+        if _MCP_PATH_FILE.is_file():
+            content = _MCP_PATH_FILE.read_text(encoding="utf-8").strip()
+            if content:
+                return str(Path(content).resolve())
+    except OSError as e:
+        logger.warning(f"读取 MCP 配置路径记录失败：{e}，使用默认路径")
+    return str(_DEFAULT_MCP_CONFIG_PATH.resolve())
+
+
+def set_mcp_config_path(path: str) -> str:
+    """设置 MCP 配置文件路径，并写入路径记录文件。
+
+    会自动创建父目录（如果不存在）。路径需通过安全校验。
+
+    Args:
+        path: 配置文件路径（绝对路径或相对项目根目录的路径）
+
+    Returns:
+        解析后的绝对路径字符串
+
+    Raises:
+        ValueError: 路径未通过安全校验
+    """
+    if not path or not path.strip():
+        raise ValueError("配置文件路径不能为空")
+
+    resolved = Path(path).resolve()
+    # 安全校验：路径必须在允许的目录白名单内
+    _validate_mcp_config_path(resolved)
+
+    # 确保父目录存在
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+
+    # 写入路径记录文件
+    try:
+        _MCP_PATH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _MCP_PATH_FILE.write_text(str(resolved), encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"写入路径记录文件失败：{e}")
+
+    logger.info(f"MCP 配置文件路径已更新：{resolved}")
+    return str(resolved)
+
+
+def _validate_mcp_config_path(path: Path) -> None:
+    """校验 MCP 配置文件路径是否在允许的目录白名单内。
+
+    防止用户指定系统敏感目录（如 C:/Windows、C:/Program Files）造成安全风险。
+
+    Args:
+        path: 解析后的绝对路径
+
+    Raises:
+        ValueError: 路径不在允许的目录内
+    """
+    # 允许用户主目录下的任意路径（个人配置）
+    if str(path).startswith(str(Path.home())):
+        return
+    # 检查白名单目录
+    for allowed_dir in _ALLOWED_MCP_CONFIG_DIRS:
+        try:
+            path.relative_to(allowed_dir.resolve())
+            return
+        except ValueError:
+            continue
+    raise ValueError(
+        f"配置文件路径不在允许的目录内。允许的目录：\n"
+        f"  - 项目 resources/ 目录\n"
+        f"  - 项目 config/ 目录\n"
+        f"  - 用户主目录（{Path.home()}）下任意路径\n"
+        f"当前路径：{path}"
+    )
+
+
+def save_mcp_server_configs(configs: list[dict], path: str = None) -> str:
+    """保存 MCP 服务器配置到本地 JSON 文件。
+
+    Args:
+        configs: MCP 配置列表
+        path: 配置文件路径（可选，不指定则使用当前路径）
+
+    Returns:
+        保存的文件绝对路径
+
+    Raises:
+        ValueError: 路径未通过安全校验
+    """
+    global _mcp_config_cache
+    if path:
+        config_path = set_mcp_config_path(path)
+    else:
+        config_path = get_mcp_config_path()
+
+    resolved = Path(config_path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(resolved, "w", encoding="utf-8") as f:
+            json.dump(configs, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        raise ValueError(f"写入 MCP 配置文件失败：{e}")
+
+    logger.info(f"MCP 配置已保存到文件：{resolved}（共 {len(configs)} 个服务器）")
+    _mcp_config_cache = None  # 配置已变更，下次读取时重读文件
+    return str(resolved)

@@ -39,7 +39,7 @@ prompt_file = os.path.join(
     "..",
     "resources",
     "system_prompt",
-    "online_learning_platform_customer_temp.txt"
+    "default_system_prompt.txt"
 )
 loader = TextLoader(prompt_file, encoding="utf-8")
 system_prompt = loader.load()[0].page_content

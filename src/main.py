@@ -4,7 +4,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from config import validate_config, get_env_int, load_mcp_server_configs
+from config import validate_config, get_env_int, load_mcp_server_configs, \
+    get_mcp_config_path, save_mcp_server_configs
 from context.user_context import CtxUser
 from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
 from mcp_client.client import init_mcp_holders
@@ -103,7 +104,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(exc: HTTPException):
+async def http_exception_handler(request: Request, exc: HTTPException):
     """HTTPException 统一包装为 {ok, detail} 格式，与业务接口响应风格一致。"""
     return FastAPIJSONResponse(
         status_code=exc.status_code,
@@ -304,11 +305,27 @@ def get_user_system_prompt_api(user_id: str, current_user: TokenData = Depends(r
 @app.put("/api/users/{user_id}/system-prompt")
 def update_user_system_prompt(user_id: str, request_body: SystemPromptUpdateRequest,
                                current_user: TokenData = Depends(require_self_or_admin)):
-    """更新用户自定义 system prompt（空字符串表示清除）。"""
+    """更新用户自定义 system prompt（空字符串表示清除）。
+
+    更新后自动失效该用户所有会话的检索缓存：
+    system_prompt 变更会影响 AI 对检索结果的使用方式，旧缓存的检索结果
+    可能与新 prompt 不匹配，需按 thread_id 清除 Redis 检索缓存。
+    """
     # 字数限制：最多 3000 字
     if len(request_body.content) > 3000:
         return Response.failed("自定义设定不能超过 3000 字")
     user_profile_service.update_system_prompt(user_id, request_body.content)
+
+    # 失效该用户所有会话的检索缓存（仅 thread_id 维度的检索缓存，不影响 JWT/登录态等其他缓存）
+    try:
+        sessions = chat_service.get_user_sessions(user_id)
+        thread_ids = [s["thread_id"] for s in sessions if s.get("thread_id")]
+        if thread_ids:
+            cache_service.clear_user_thread_caches(user_id, thread_ids)
+    except Exception as e:
+        # 缓存清除失败不影响主流程：system_prompt 已更新成功，缓存会在 TTL 后自然过期
+        logger.warning(f"更新 system_prompt 后清除检索缓存失败 user_id={user_id}: {e}")
+
     return Response.success("自定义设定更新成功")
 
 
@@ -346,6 +363,56 @@ def update_user_mcp_config(user_id: str, request_body: McpConfigUpdateRequest,
         return Response.success("MCP 配置更新成功")
     except (ValueError, TypeError) as e:
         return Response.failed(f"MCP 配置格式错误：{e}")
+
+
+# ============================================================
+# 全局 MCP 配置接口（本地文件存储）
+# 作用：MCP 配置存储在用户本地 JSON 文件中，用户可指定路径
+# 读写均走该文件，替代原有的数据库存储方式
+# ============================================================
+@app.get("/api/mcp/config")
+def get_global_mcp_config(current_user: TokenData = Depends(get_current_user)):
+    """获取全局 MCP 配置（从本地文件读取）。
+
+    Returns:
+        { ok, data: { path, mcp_servers } }
+    """
+    config_path = get_mcp_config_path()
+    mcp_servers = load_mcp_server_configs()
+    return {"ok": True, "data": {"path": config_path, "mcp_servers": mcp_servers}}
+
+
+@app.put("/api/mcp/config")
+def update_global_mcp_config(
+    request_body: dict,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """更新全局 MCP 配置（保存到本地文件）。
+
+    Request body:
+        - path: 配置文件路径（可选，不指定则使用当前路径）
+        - mcp_servers: MCP 配置列表（必填）
+
+    Returns:
+        { ok, detail, data: { path } }
+    """
+    mcp_servers = request_body.get("mcp_servers")
+    path = request_body.get("path")
+
+    if mcp_servers is None:
+        return Response.failed("缺少 mcp_servers 字段")
+    if not isinstance(mcp_servers, list):
+        return Response.failed("mcp_servers 必须是 JSON 数组")
+
+    try:
+        saved_path = save_mcp_server_configs(mcp_servers, path)
+        return {
+            "ok": True,
+            "detail": "MCP 配置已保存到本地文件，重启后端服务后生效",
+            "data": {"path": saved_path}
+        }
+    except ValueError as e:
+        return Response.failed(str(e))
 
 
 # ============================================================

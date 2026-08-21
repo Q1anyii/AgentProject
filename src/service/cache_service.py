@@ -169,6 +169,51 @@ class CacheService:
         logger.error(f"未命中，重排最高分 {best['relevance_score']} 低于阈值 {CACHE_RERANK_HIT_SCORE}")
         return None
 
+    def clear_thread_cache(self, thread_id: str) -> int:
+        """清除指定 thread_id 的所有检索缓存。
+
+        用于用户更新 system_prompt 等场景：prompt 变更后，旧缓存的检索结果
+        可能与新 prompt 不匹配，需失效该用户所有会话的缓存。
+
+        Args:
+            thread_id: 会话 ID
+
+        Returns:
+            实际删除的 key 数量
+        """
+        if not thread_id:
+            return 0
+        pattern = f"retrieve_cache:{thread_id}:*"
+        deleted = 0
+        # SCAN 遍历匹配 key（避免 KEYS 阻塞 Redis），批量删除
+        cursor = 0
+        while True:
+            cursor, keys = self.redis.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                deleted += self.redis.delete(*keys)
+            if cursor == 0:
+                break
+        if deleted > 0:
+            logger.info(f"已清除 thread_id={thread_id} 的检索缓存 {deleted} 条")
+        return deleted
+
+    def clear_user_thread_caches(self, user_id: str, thread_ids: list[str]) -> int:
+        """批量清除用户多个会话的检索缓存。
+
+        Args:
+            user_id: 用户 ID（仅用于日志）
+            thread_ids: 会话 ID 列表
+
+        Returns:
+            实际删除的 key 总数
+        """
+        total = 0
+        for tid in thread_ids:
+            total += self.clear_thread_cache(tid)
+        if total > 0:
+            logger.info(f"用户 user_id={user_id} 共清除 {len(thread_ids)} 个会话的检索缓存，合计 {total} 条")
+        return total
+
 
 # 全局单例：连接生命周期由 main.py 的 lifespan 统一 open()/close()，
 # 业务模块（retrieve_graph 等）直接 import 本实例，不自行创建/关闭

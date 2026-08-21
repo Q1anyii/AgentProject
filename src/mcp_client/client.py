@@ -78,7 +78,7 @@ class McpServerConnection:
             # 预检：服务器脚本必须存在。避免子进程启动失败触发 mcp 库在
             # Windows 上的取消作用域泄漏 bug（anyio cancel scope 跨任务退出），
             # 该 bug 会污染同一事件循环中后续服务器的连接
-            if params.args:
+            if params.args and not params.args[0].startswith("-"):
                 script = Path(params.cwd or ".") / params.args[0]
                 if not script.exists():
                     raise ConnectionError(f"MCP 服务器脚本不存在：{script}")
@@ -139,7 +139,7 @@ class McpServerConnection:
         await self._stack.aclose()
 
 
-async def init_mcp_holders(servers: list[dict[str, Any]]) -> list[McpServerConnection]:
+async def init_mcp_holders(servers: list[dict[str, Any]], timeout: int = 15) -> list[McpServerConnection]:
     """按配置连接全部 MCP 服务器，返回连接列表。
 
     - connections[i].tools：LangChain 工具列表（供图使用）
@@ -148,16 +148,28 @@ async def init_mcp_holders(servers: list[dict[str, Any]]) -> list[McpServerConne
 
     单个服务器连接失败只跳过该服务器并告警，不影响其他服务器与主流程
     （图内工具列表缺少远程工具时自动降级为纯 LLM 回答）。
+
+    Args:
+        servers: MCP 服务器配置列表
+        timeout: 单个服务器连接超时时间（秒），默认 15 秒。
+                 防止 MCP 服务器启动后 stdio 通信无响应时阻塞整个后端启动。
     """
     connections: list[McpServerConnection] = []
     for cfg in servers:
+        server_name = cfg.get('name', cfg.get('type', 'unknown'))
         try:
             conn = McpServerConnection(cfg)
-            await conn.open()
+            # 超时保护：单个 MCP 服务器连接超时后跳过，不阻塞主流程
+            await asyncio.wait_for(conn.open(), timeout=timeout)
             connections.append(conn)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"MCP 服务器 [{server_name}] 连接超时（{timeout}s），已跳过。"
+                f"请检查该服务器是否能正常响应 stdio 通信。"
+            )
         except Exception as e:
             logger.warning(
-                f"MCP 服务器 [{cfg.get('name', cfg.get('type', 'unknown'))}] 连接失败，已跳过：{e}"
+                f"MCP 服务器 [{server_name}] 连接失败，已跳过：{e}"
             )
     return connections
 

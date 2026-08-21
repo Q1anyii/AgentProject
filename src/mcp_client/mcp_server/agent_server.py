@@ -13,7 +13,7 @@ mcp = FastMCP("agent_server")
 
 @mcp.tool()
 async def chat(query: str, thread_id: str = "mcp-default", user_id: str = "mcp-user") -> str:
-    """客服对话：含知识库检索、短期记忆（thread_id 隔离）、长期记忆（user_id 隔离）"""
+    """助理对话：含知识库检索、短期记忆（thread_id 隔离）、长期记忆（user_id 隔离）"""
     return await chat_service.a_invoke(user_id, thread_id, query)   # 已有异步壳，流式降级为整段返回
 
 @mcp.tool()

@@ -1,4 +1,4 @@
-# 米塔 AI 智能客服（Mitta）
+# 米塔 AI 智能助理（Mitta）
 
 基于**LangGraph + RAG + 流式 SSE**的多智能体智能AI系统。系统内置知识库检索链路（查询改写 → 多路召回 → RRF 融合 → 在线重排），支持短期记忆（多轮对话恢复）与长期记忆（用户档案），并通过 SSE 流式输出实现打字机效果。
 
@@ -74,7 +74,7 @@ AgentProject/
 │   └── test_rand_id_util.py          # ID 生成工具测试
 ├── resources/                        # 资源文件
 │   ├── FAQ/                          # 知识库源文档（在线学习平台 FAQ，RAG 专用）
-│   ├── system_prompt/                # 客服系统提示词（人设与回答规则）
+│   ├── system_prompt/                # 助理系统提示词（人设与回答规则）
 │   ├── chroma_db/                    # ChromaDB 向量库持久化数据（运行时生成）
 │   └── frontend/                     # 前端静态资源
 │       ├── index.html                # 聊天界面（原生 JS 单页应用，含登录/注册）
@@ -142,7 +142,7 @@ pip install -r requirements.txt
 cd src
 python embedding.py
 # 示例输入：
-# 文档路径: ../resources/FAQ/在线学习平台FAQ知识库（智能客服RAG专用）.md
+# 文档路径: ../resources/FAQ/在线学习平台FAQ知识库（智能助理RAG专用）.md
 # source 与 category: FAQ 平台业务
 ```
 

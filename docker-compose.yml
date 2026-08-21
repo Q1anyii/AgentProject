@@ -1,5 +1,5 @@
 # ============================================================
-# docker-compose.yml — 米塔 AI 智能客服一键部署
+# docker-compose.yml — 米塔 AI 智能助理一键部署
 # 启动：docker-compose up -d
 # 停止：docker-compose down
 # 查看日志：docker-compose logs -f api
