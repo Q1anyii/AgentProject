@@ -24,6 +24,7 @@ from service.login_service import login_service
 from utils.response_util import Response
 from utils.jwt_utils import get_current_user, create_access_token, create_refresh_token, TokenData, \
     REFRESH_TOKEN_EXPIRE_DAYS
+from utils.tools_util import safety_filter
 
 # 注意：.env 加载由 config.py 统一处理，无需重复 load_dotenv()
 
@@ -44,10 +45,12 @@ async def lifespan(app: FastAPI):
     validate_config()
     mcp_holders = await init_mcp_holders(load_mcp_server_configs())
     mcp_tools = [t for h in mcp_holders for t in h.tools]
+    filtered_tools = []
     if mcp_tools:
-        logger.success(f"已加载 MCP 工具：{[t.name for t in mcp_tools]}")
+        filtered_tools = safety_filter(mcp_tools)
+        logger.success(f"已加载 MCP 工具：{[t.name for t in filtered_tools]}")
     logger.info("正在初始化 LangGraph 资源...")
-    chat_service.open(mcp_tools)
+    chat_service.open(filtered_tools)
     login_service.open()
     cache_service.open()
     user_profile_service.open()

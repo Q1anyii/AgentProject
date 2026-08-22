@@ -36,7 +36,6 @@ class ChatService:
         self.redis_client = None
 
     def open(self, mcp_tools: list | None = None):
-        from init import embedding_function
         self.vector_store = create_vector_store(load_vector_db_config())
         self.pool = ConnectionPool(
             conninfo=self.db_url,

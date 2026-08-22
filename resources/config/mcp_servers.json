@@ -65,7 +65,7 @@
     "type": "stdio",
     "command": "uvx",
     "args": [
-      "crawl-mcp"
+      "crawl4ai-mcp"
     ]
   }
 ]
