@@ -8,17 +8,17 @@ from langgraph.types import Send
 from loguru import logger
 from pydantic import Field, BaseModel, ConfigDict
 from service.cache_service import cache_service as _cache_service
-from utils.doc_util import unpack_query_results, documents_to_dicts
+from constant.retrieval_constants import TOP_K, DISTANCE_THRESHOLD, REWRITE_PROMPT, RRF_K
+from vector.vector_store import VectorStore
+from vector.retrieve_doc import RetrievedDoc
 import json, re
 from init import model, online_rerank
-from constant.retrieval_constants import TOP_K, DISTANCE_THRESHOLD, REWRITE_PROMPT, RRF_K
 
 
-def build_retrieve_graph(collection):
+def build_retrieve_graph(vector_store: VectorStore):
     # ← 原 query_rerank_graph 逻辑整体搬入
      # Redis 检索缓存：全局单例（main.py lifespan 统一 open/close），节点内直接使用，不自行管理生命周期
     cache_service = _cache_service
-
     class OutputState(TypedDict):
         output: List[Document]
 
@@ -27,8 +27,8 @@ def build_retrieve_graph(collection):
         question: str
         history: List[Dict[str, str]]  # 多轮对话历史，只用于 query 改写
         rewritten_queries: List[str]  # 改写后的查询列表
-        merged_docs: List[Document]  # 多查询召回 + RRF 融合后的候选
-        reranked_docs: List[Document]  # 重排后的最终文档
+        merged_docs: List[RetrievedDoc]  # 多查询召回 + RRF 融合后的候选
+        reranked_docs: List[RetrievedDoc]  # 重排后的最终文档（缓存命中时为 dict 恢复的 Document）
         cache_hit: Optional[bool]
 
     class QueryRewriteResult(BaseModel):
@@ -87,14 +87,13 @@ def build_retrieve_graph(collection):
         logger.info(f"重写后问题:{queries}")
         return {"rewritten_queries": queries}
 
-    from concurrent.futures import ThreadPoolExecutor
-
-    def rrf_fusion(results: List[List[Document]], k: int = RRF_K) -> List[Document]:
+    def rrf_fusion(results: List[List[RetrievedDoc]], k: int = RRF_K) -> List[RetrievedDoc]:
         scores = {}
 
         for docs in results:
             for rank, doc in enumerate(docs):
-                key = doc.metadata.get("id", doc.page_content)
+                # 融合 key 用向量库主键（sha256 哈希 id）；未携带时回退内容文本
+                key = doc.id or doc.text
                 if key not in scores:
                     scores[key] = {"doc": doc, "score": 0.0}
                 scores[key]["score"] += 1.0 / (k + rank + 1)
@@ -112,49 +111,10 @@ def build_retrieve_graph(collection):
         # TOP_K 和 DISTANCE_THRESHOLD 已移至 constant/retrieval_constants.py 统一管理
         queries = state["rewritten_queries"]
 
-        with ThreadPoolExecutor(max_workers=min(len(queries), 4)) as ex:
-            raw_chroma_results = list(
-                ex.map(
-                    lambda q: collection.query(query_texts=[q], n_results=TOP_K),
-                    queries,
-                )
-            )
+        filtered_results = vector_store.query(queries, TOP_K)
+        merged_docs = rrf_fusion(filtered_results)
 
-            # 对每一个query的检索结果，先执行distance阈值过滤
-            filtered_results: List[Dict[str, Any]] = []
-            for res in raw_chroma_results:
-                # chroma collection.query 返回格式：{documents:[[...]], distances:[[...]], metadatas:[[...]], ids:[[...]]}
-                docs_list = res["documents"][0]
-                dists_list = res["distances"][0]
-                meta_list = res["metadatas"][0]
-                id_list = res["ids"][0]
-
-                keep_docs = []
-                keep_dists = []
-                keep_metas = []
-                keep_ids = []
-
-                for doc_text, dist, meta, doc_id in zip(docs_list, dists_list, meta_list, id_list):
-                    if dist < DISTANCE_THRESHOLD:
-                        meta["_distance"] = dist  # 埋入元数据，用于langsmith调试看距离
-                        keep_docs.append(doc_text)
-                        keep_dists.append(dist)
-                        keep_metas.append(meta)
-                        keep_ids.append(doc_id)
-
-                # 把过滤之后的结果重新组装成chroma相同结构，给unpack_query_results复用
-                filtered_results.append({
-                    "documents": [keep_docs],
-                    "distances": [keep_dists],
-                    "metadatas": [keep_metas],
-                    "ids": [keep_ids]
-                })
-
-            # 现在传给unpack的已经是过滤噪声之后的数据
-            docs_per_query = unpack_query_results(filtered_results)
-            merged_docs = rrf_fusion(docs_per_query)
-
-            return {"merged_docs": merged_docs}
+        return {"merged_docs": merged_docs}
 
     def rerank(state: RAGState) -> dict:
         docs = state["merged_docs"]
@@ -164,7 +124,7 @@ def build_retrieve_graph(collection):
         # 用改写后的主查询做精排，通常比原始口语问题更稳定
         query = state["rewritten_queries"][0]
 
-        results = online_rerank(query, [doc.page_content for doc in docs], top_n=10)
+        results = online_rerank(query, [doc.text for doc in docs], top_n=10)
         top_docs = [docs[r["index"]] for r in results]
 
         return {"reranked_docs": top_docs}

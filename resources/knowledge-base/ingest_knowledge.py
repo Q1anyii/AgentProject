@@ -12,7 +12,6 @@
 """
 
 import sys
-import os
 from pathlib import Path
 
 # 确保 src 目录在 Python 路径中
@@ -64,7 +63,7 @@ def get_category(file_path: Path) -> str:
 
 def ingest_file(processor, file_path: Path) -> int:
     """入库单个文件，返回写入的文档条数。"""
-    from embedding import Meta
+    from vector.embedding import Meta
 
     category = get_category(file_path)
     source = "knowledge_base"
@@ -88,13 +87,12 @@ def main():
 
     # 初始化 EmbeddingProcessor
     try:
-        from embedding import EmbeddingProcessor
-        chroma_path = PROJECT_ROOT / "resources" / "chroma_db"
-        processor = EmbeddingProcessor(persist_path=str(chroma_path))
-        logger.info(f"向量库初始化成功: {chroma_path}")
+        from vector.embedding import EmbeddingProcessor
+        processor = EmbeddingProcessor()
+        logger.info(f"向量库初始化成功")
     except Exception as e:
         logger.error(f"向量库初始化失败: {e}")
-        logger.error("请检查 .env 配置和网络连接")
+        logger.error("请检查 vector_db.json 配置和网络连接")
         sys.exit(1)
 
     # 收集所有 .md 文件
@@ -125,7 +123,7 @@ def main():
     logger.info(f"  成功文件: {success_count}/{len(md_files)}")
     logger.info(f"  失败文件: {fail_count}")
     logger.info(f"  总文档数: {total_docs}")
-    logger.info(f"  集合总数: {processor.collection.count()}")
+    logger.info(f"  集合总数: {processor.count()}")
     logger.info("=" * 60)
 
     if fail_count > 0:

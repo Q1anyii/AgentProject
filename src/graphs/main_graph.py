@@ -52,7 +52,7 @@ def build_main_graph(retrieve_graph,
         # 导致 llm_node 里 doc.page_content 报 AttributeError。
         # 统一在入 state 前转成 dict，llm_node 侧兼容两种形态读取。
         output = retrieve_res.get("output", [])
-        if output and hasattr(output[0], "page_content"):
+        if output and (hasattr(output[0], "page_content") or hasattr(output[0], "text")):
             retrieve_res["output"] = documents_to_dicts(output)
 
         return {

@@ -9,10 +9,13 @@ from psycopg_pool import ConnectionPool
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from loguru import logger
 from langgraph.cache.redis import RedisCache  # 可能需要 langgraph-checkpoint-redis 扩展
+
+from config import load_vector_db_config
 from graphs.main_graph import build_main_graph
 from graphs.retrieve_graph import build_retrieve_graph
 from init import COLLECTION_NAME, CustomPostgresSaver
 from service.cache_service import cache_service
+from vector.vector_store import create_vector_store
 
 
 class ChatService:
@@ -22,24 +25,19 @@ class ChatService:
     db_url: str
 
 
-    def __init__(self, persist_path="../resources/chroma_db", db_url=None):
-        self.persist_path = persist_path
+    def __init__(self, db_url=None):
         self.db_url = db_url or os.getenv("POSTGRESQL_DB_URL")
         # 资源占位，open() 里真正创建，close() 里释放
-        self.client = self.collection = None
+        self.vector_store = None
         self.pool = self.checkpointer = self.store = None
         self.main_graph = None            # 主对话图
-        self.rerank_graph = None     # 改写+重排图
+        self.retrieve_graph = None     # 改写+重排图
         self.cache = None
         self.redis_client = None
 
     def open(self, mcp_tools: list | None = None):
         from init import embedding_function
-        self.client = chromadb.PersistentClient(path=str(self.persist_path))
-        self.collection = self.client.get_collection(
-            name= COLLECTION_NAME,
-            embedding_function=embedding_function,  # 与 RAG 侧保持一致
-            )
+        self.vector_store = create_vector_store(load_vector_db_config())
         self.pool = ConnectionPool(
             conninfo=self.db_url,
             kwargs={"autocommit": True},
@@ -59,7 +57,7 @@ class ChatService:
         self.checkpointer.setup()
         self.store.setup()
         self.cache = RedisCache(cache_service.redis)  # ← self.，且 compile 用它
-        self.retrieve_graph = build_retrieve_graph(self.collection)   # 只 build 一次，替代 @lru_cache
+        self.retrieve_graph = build_retrieve_graph(self.vector_store)   # 只 build 一次，替代 @lru_cache
         self.main_graph = build_main_graph(  # 改：显式传参
             retrieve_graph=self.retrieve_graph,
             pool=self.pool,

@@ -46,10 +46,11 @@ def unpack_query_results(results: List[Any]) -> List[List[Document]]:
 
     return all_query_docs
 
-def documents_to_dicts(docs: List[Document]) -> List[Dict[str, Any]]:
+def documents_to_dicts(docs: List[Any]) -> List[Dict[str, Any]]:
+    # 兼容两种形态：langchain Document（page_content）与 vector.RetrievedDoc（text）
     return [
         {
-            "page_content": doc.page_content,
+            "page_content": getattr(doc, "page_content", None) or getattr(doc, "text", ""),
             "metadata": doc.metadata,
         }
         for doc in docs

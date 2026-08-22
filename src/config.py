@@ -7,7 +7,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -204,6 +204,7 @@ def load_mcp_server_configs() -> list[dict]:
 _MCP_PATH_FILE = Path(__file__).resolve().parent.parent / "resources" / "config" / ".mcp_config_path"
 # 默认配置文件路径
 _DEFAULT_MCP_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "config" / "mcp_servers.json"
+_DEFAULT_VECTOR_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "config" / "vector_db.json"
 # 允许的配置文件目录白名单（安全限制，防止写入系统敏感目录）
 _ALLOWED_MCP_CONFIG_DIRS = [
     Path(__file__).resolve().parent.parent / "resources",
@@ -294,7 +295,6 @@ def _validate_mcp_config_path(path: Path) -> None:
         f"当前路径：{path}"
     )
 
-
 def save_mcp_server_configs(configs: list[dict], path: str = None) -> str:
     """保存 MCP 服务器配置到本地 JSON 文件。
 
@@ -326,3 +326,40 @@ def save_mcp_server_configs(configs: list[dict], path: str = None) -> str:
     logger.info(f"MCP 配置已保存到文件：{resolved}（共 {len(configs)} 个服务器）")
     _mcp_config_cache = None  # 配置已变更，下次读取时重读文件
     return str(resolved)
+
+_VECTOR_PATH_FILE = Path(__file__).resolve().parent.parent / "resources" / "config" / ".vector_config_path"
+_DEFAULT_VECTOR_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "config" / "vector_db.json"
+
+def get_vector_config_path() -> str:
+    """获取当前向量库配置文件路径。
+
+    优先从路径记录文件读取；记录文件不存在或为空时返回默认路径。
+
+    Returns:
+        向量库配置文件的绝对路径字符串
+    """
+    try:
+        if _VECTOR_PATH_FILE.is_file():
+            content = _VECTOR_PATH_FILE.read_text(encoding="utf-8").strip()
+            if content:
+                return str(Path(content).resolve())
+    except OSError as e:
+        logger.warning(f"读取 VECTOR_DB 配置路径记录失败：{e}，使用默认路径")
+    return str(_DEFAULT_VECTOR_CONFIG_PATH.resolve())
+
+def load_vector_db_config() -> dict[str, Any]:
+    config_path = get_vector_config_path()
+    if not config_path or not Path(config_path).is_file():
+        logger.info(f"VECTOR 配置文件不存在（路径: {config_path}），使用默认配置")
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (json.JSONDecodeError, TypeError, OSError) as e:
+        logger.warning(f"VECTOR 配置文件读取失败（路径: {config_path}）：{e}，使用默认配置")
+        return {}
+
+    validated = cfg
+
+    logger.info(f"VECTOR 服务器配置加载完成，{validated.get('type')}{validated.get('collection')}")
+    return validated

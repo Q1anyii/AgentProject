@@ -1,7 +1,6 @@
 import asyncio
 from pathlib import Path
 
-import chromadb
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders.markdown import UnstructuredMarkdownLoader
@@ -10,7 +9,11 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from loguru import logger
 import hashlib
-from constant.embedding_constants import COLLECTION_NAME, CHUNK_SIZE, CHUNK_OVERLAP
+
+from config import load_vector_db_config
+from constant.embedding_constants import CHUNK_SIZE, CHUNK_OVERLAP
+from vector.vector_store import create_vector_store
+
 
 class Meta:
     """文档元数据：来源（source）与分类（category）。"""
@@ -37,7 +40,7 @@ def compute_doc_hash_with_meta(docs: list[Document]) -> list[str]:
 
 """
 EmbeddingProcessor（类）
-├── __init__(persist_path)        # 连接 Chroma，复用 init.embedding_function（延迟导入防循环）
+├── __init__()                     # 通过 create_vector_store 工厂创建向量库（复用 init.embedding_function）
 │
 ├── 静态方法（纯函数）
 │   ├── doc_2_str(docs)           # 文档拼接
@@ -45,7 +48,8 @@ EmbeddingProcessor（类）
 │   └── split_docs(file_path)     # 300/50 切分
 │
 ├── 同步入口
-│   └── embed(file_path, meta) -> int    # 解析→切分→入库→返回条数
+│   ├── embed(file_path, meta) -> int    # 解析→切分→入库→返回条数
+│   └── count() -> int                    # 当前集合总数
 │
 └── 异步协程入口
     ├── aembed(...)               # async 版 embed
@@ -62,17 +66,9 @@ class EmbeddingProcessor:
     常量（COLLECTION_NAME/CHUNK_SIZE/CHUNK_OVERLAP）已移至 constant/embedding_constants.py 统一管理。
     """
 
-    def __init__(self, persist_path: str | Path = "../resources/chroma_db"):
-        # 延迟导入：init.py 会初始化模型等重资源
-        from init import embedding_function
-
-        self.embedding_function = embedding_function
-        self.client = chromadb.PersistentClient(path=str(persist_path))
-        self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
-            embedding_function=self.embedding_function,  # 与 RAG 侧保持一致
-            metadata={"hnsw:space": "cosine"},
-        )
+    def __init__(self):
+        # 工厂内部会延迟导入 init.embedding_function（init.py 初始化模型等重资源）
+        self.vector_store = create_vector_store(load_vector_db_config())
 
     # ---------- 文档解析与切分（纯函数） ----------
 
@@ -89,7 +85,10 @@ class EmbeddingProcessor:
 
         match suffix:
             case ".md":
-                loader = UnstructuredMarkdownLoader(file_path)
+                # 注意：不能用 UnstructuredMarkdownLoader——它会解析掉 markdown 语法（# 标题 → 纯文本），
+                # 导致后续 MarkdownHeaderTextSplitter 找不到 # 标记，切分结果为空（入库 0 条）。
+                # 改用 TextLoader 读取原始 markdown 文本，保留 # 标题标记。
+                loader = TextLoader(file_path, encoding="utf-8")
                 docs = loader.load()
                 headers_to_split_on = [
                     ("#", "Header 1"),
@@ -98,6 +97,10 @@ class EmbeddingProcessor:
                 document = EmbeddingProcessor.doc_2_str(docs)
                 splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
                 parent_docs = splitter.split_text(document)
+                # 兜底：文档无 # / ## 标题时，按标题切分结果为空，直接用原始文档
+                if not parent_docs:
+                    logger.warning(f"{file_path.name} 无 # / ## 标题，跳过标题切分，直接按 chunk 切分")
+                    parent_docs = docs
             case ".txt":
                 parent_docs = TextLoader(file_path).load()
             case ".pdf":
@@ -113,8 +116,8 @@ class EmbeddingProcessor:
         try:
             parent_docs = EmbeddingProcessor.load_docs(file_path=file_path)
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=EmbeddingProcessor.CHUNK_SIZE,
-                chunk_overlap=EmbeddingProcessor.CHUNK_OVERLAP,
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
             )
             return text_splitter.split_documents(parent_docs)
         except FileNotFoundError as e:
@@ -138,15 +141,21 @@ class EmbeddingProcessor:
             metadata.update(doc.metadata)  # 合并 Header 1 / Header 2 标题信息
             metadatas.append(metadata)
 
-        self.collection.upsert(
+        self.vector_store.upsert(
             ids=ids,
             documents=[doc.page_content for doc in child_docs],
             metadatas=metadatas,  # 与 ids 等长
         )
-        count = self.collection.count()
-        if count:
-            logger.info(f"信息嵌入成功，当前集合共 {count} 条")
-        return count
+        # 返回本次写入的条数，而非集合总数
+        # 注意：Milvus 的 get_collection_stats 在 upsert 后有异步 flush 延迟，
+        # 立即调用 count() 可能返回 0，因此用 len(child_docs) 作为本次写入数
+        written = len(child_docs)
+        logger.info(f"信息嵌入成功，本次写入 {written} 条")
+        return written
+
+    def count(self) -> int:
+        """当前向量集合文档总数（ingest_knowledge.py 汇总用）。"""
+        return self.vector_store.count()
 
     # ---------- 异步协程入口 ----------
 

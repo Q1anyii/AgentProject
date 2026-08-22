@@ -1,0 +1,5 @@
+{
+  "type": "milvus",
+  "uri": "http://localhost:19530",
+  "collection": "FAQ_KNOWLEDGE_BASE"
+}
