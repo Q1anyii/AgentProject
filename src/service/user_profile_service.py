@@ -80,9 +80,9 @@ class UserProfileService:
                 CREATE TABLE IF NOT EXISTS user_profile (
                     user_id VARCHAR(64) PRIMARY KEY COMMENT '用户ID，关联 userInfo.user_id',
                     username VARCHAR(64) DEFAULT NULL COMMENT '显示用户名',
-                    avatar TEXT DEFAULT NULL COMMENT '头像（base64 data URL 或 颜色标识）',
+                    avatar MEDIUMTEXT DEFAULT NULL COMMENT '头像（base64 data URL，最大16MB）',
                     assistant_style TEXT DEFAULT NULL COMMENT '助手风格设定（用户自定义）',
-                    system_prompt TEXT DEFAULT NULL COMMENT '用户自定义 system prompt（全局）',
+                    system_prompt MEDIUMTEXT DEFAULT NULL COMMENT '用户自定义 system prompt（全局）',
                     theme VARCHAR(32) DEFAULT 'default' COMMENT '前端主题名称',
                     mcp_config JSON DEFAULT NULL COMMENT 'MCP 服务器配置（JSON 数组）',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -90,6 +90,18 @@ class UserProfileService:
                     INDEX idx_theme (theme)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户扩展信息表';
             """)
+            # 迁移：旧表 avatar/system_prompt 为 TEXT（64KB），base64 头像会被截断导致登出后失效
+            # 检查列类型并升级为 MEDIUMTEXT（16MB）
+            cur.execute("""
+                SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_profile'
+                AND COLUMN_NAME IN ('avatar', 'system_prompt')
+            """)
+            for row in cur.fetchall():
+                col_name, data_type = row["COLUMN_NAME"], row["DATA_TYPE"]
+                if data_type.lower() == "text":
+                    cur.execute(f"ALTER TABLE user_profile MODIFY COLUMN {col_name} MEDIUMTEXT")
+                    logger.info(f"user_profile.{col_name} 已从 TEXT 迁移为 MEDIUMTEXT")
             conn.commit()
         except pymysql.MySQLError as e:
             logger.error(f"创建 user_profile 表失败: {e}")

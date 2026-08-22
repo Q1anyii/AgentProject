@@ -54,6 +54,9 @@ def build_retrieve_graph(vector_store: VectorStore):
     def check_cache(state: RAGState, config: RunnableConfig) -> dict:
         question = state["question"]
         thread_id = config["configurable"].get("thread_id", None)
+        # 无 thread_id（如评估脚本/离线调用）时跳过缓存，避免 Redis 写入 None 报错
+        if not thread_id:
+            return {"cache_hit": False}
         query_in_cache = cache_service.query_cache(thread_id, question, 3)
         if query_in_cache:
             logger.success("缓存命中，直接返回")
@@ -62,6 +65,8 @@ def build_retrieve_graph(vector_store: VectorStore):
 
     def store_cache(state: RAGState, config: RunnableConfig) -> dict:
         thread_id = config["configurable"].get("thread_id", None)
+        if not thread_id:
+            return {}
         if not state.get("cache_hit"):
             # ttl 走 CacheService.store_cache 默认值（15s）；不要对 user_id 调 redis TTL——
             # TTL 只能查已存在 key 的剩余时间，user_id 不是 key，返回 -2 会导致 expire 异常
@@ -81,9 +86,17 @@ def build_retrieve_graph(vector_store: VectorStore):
 
         resp = model.invoke(prompt, response_format={"type": "json_object"})
         raw_json = extract_json(resp.content)
-        result = QueryRewriteResult(**raw_json)
+        # 容错：LLM 偶尔返回 {"queries": [...]} 等非预期格式，Pydantic 校验失败时降级处理
+        try:
+            result = QueryRewriteResult(**raw_json)
+            queries = [result.main_query] + result.sub_queries
+        except Exception:
+            logger.warning(f"Query 改写返回格式异常，尝试兼容解析: {list(raw_json.keys())}")
+            if isinstance(raw_json.get("queries"), list) and raw_json["queries"]:
+                queries = raw_json["queries"]
+            else:
+                queries = [state["question"]]
 
-        queries = [result.main_query] + result.sub_queries
         logger.info(f"重写后问题:{queries}")
         return {"rewritten_queries": queries}
 
