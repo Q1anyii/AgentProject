@@ -1,20 +1,27 @@
 from typing import Annotated, Optional, Any
+import json
+import uuid
 
 from langchain_core.tools import BaseTool
 from langgraph.types import CachePolicy, Send
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.constants import START, END
 from langgraph.graph.message import MessagesState
 from langgraph.graph.state import StateGraph
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 from pydantic import Field
-from graphs.tool_graph import build_tool_graph
+from graphs.tool_filter import ToolFilter
 from init import model, system_prompt
 from utils.doc_util import documents_to_dicts
 from constant.prompt_constants import MEMORY_EXTRACT_PROMPT, CLASSIFIER_PROMPT, NO_INFO_MARKS
+from constant.cache_constant import (
+    CACHE_RETRIEVE_NODE_TTL,
+    CACHE_TOOL_NODE_TTL,
+    CACHE_MEMORY_NODE_TTL,
+)
 
 
 def build_main_graph(retrieve_graph,
@@ -23,15 +30,69 @@ def build_main_graph(retrieve_graph,
     store,
     cache=None,
     mcp_tools: list[BaseTool] | None = None,):
-    # 工具：LLM 需要时可调用（用户信息/会话总结），工具通过请求级上下文读取数据
-    tools = build_tool_graph(mcp_tools)  # 原 build_tool_graph() 调用点替换
+    # 工具：ToolNode 绑定全量安全工具（按 name 路由执行），
+    # LLM 侧在 llm_node 里按本轮 query 运行时筛选后 bind_tools（见 llm_node）
+    tool_filter = ToolFilter()
+    tools = list(mcp_tools or [])  # build 期无用户 query，不做筛选，直接全量绑定路由
     tool_node = ToolNode(tools)
-    model_with_tools = model.bind_tools(tools)  # ← 原 build_chat_graph 逻辑整体搬入
 
     class OverAllState(MessagesState):
         input_str: Annotated[str, Field(description="用户输入")]
         retrieve_res: Annotated[Optional[list[Any] | dict[str, Any] | Any], "检索结果"] = None
         needs_retrieval: Annotated[bool, Field(description="是否需要检索知识库")] = False
+        tool_status: Annotated[str, Field(
+            description="本轮工具状态：executed=工具被执行；unavailable=无工具可用；idle=筛选出工具但模型未调用"
+        )] = "idle"
+
+    def _retrieve_cache_key(state: dict) -> str:
+        """retrieve_node 缓存键只取用户输入，不取整个 Send payload。
+
+        默认 key_func 会对节点输入整体 pickle 哈希，而 route() 的 Send payload
+        含每轮累积变化的 messages，会导致缓存键每轮都变、缓存永不命中；
+        检索结果本身只取决于问题（知识库全局共享），历史仅用于指代改写，
+        同一问题短窗口内直接复用即可（Redis 键见 cache.redis.RedisCache 的 prefix）。
+        """
+        if not isinstance(state, dict):
+            return str(state)
+        return state.get("input_str", "")
+
+    def _tool_cache_key(state: dict) -> str:
+        """tool_node 缓存键：取本轮 AI 消息的 tool_calls（工具名+参数，排除每次变化的调用 id）。
+
+        只有 route_after_llm 在 tool_calls 非空时才路由到 tool_node，因此缓存条目
+        必然产生于工具真实执行之后（含执行失败返回的错误 ToolMessage），满足
+        "工具被执行才存入缓存"；TTL 窗口内同工具同参数调用直接复用结果、跳过真实执行。
+        防御分支（理论不可达）返回随机键，避免无工具调用时互相误命中。
+        """
+        if not isinstance(state, dict):
+            return f"nocache-{uuid.uuid4().hex}"
+        msgs = state.get("messages", []) if isinstance(state.get("messages", []), list) else []
+        for m in reversed(msgs):
+            if isinstance(m, AIMessage) and m.tool_calls:
+                calls = sorted(
+                    (tc.get("name", ""), json.dumps(tc.get("args", {}), ensure_ascii=False, sort_keys=True))
+                    for tc in m.tool_calls
+                )
+                return f"{len(msgs)}|{json.dumps(calls, ensure_ascii=False)}"
+        return f"nocache-{uuid.uuid4().hex}"
+
+    def _memory_cache_key(state: dict) -> str:
+        """memory_node 缓存键：仅当本轮工具被执行（executed）或执行失败/无工具可用（unavailable）
+        时返回确定性 key（可命中）；idle 轮（筛选出工具但模型未调用）返回随机键，永不命中、
+        不与其他轮次共享缓存。key 含消息轮次（len(msgs)），避免跨轮同文误命中导致
+        store 记忆写入被跳过；命中时跳过 LLM 记忆提取与 store.put（仅限 TTL 内同轮重复到达）。
+        """
+        if not isinstance(state, dict):
+            return f"nocache-{uuid.uuid4().hex}"
+        if state.get("tool_status") not in ("executed", "unavailable"):
+            return f"nocache-{uuid.uuid4().hex}"
+        msgs = state.get("messages", []) if isinstance(state.get("messages", []), list) else []
+        last_ai = ""
+        for m in reversed(msgs):
+            if isinstance(m, AIMessage) and m.content:
+                last_ai = m.content if isinstance(m.content, str) else str(m.content)
+                break
+        return f"{len(msgs)}|{state.get('input_str', '')}|{last_ai}"
 
     def retrieve_node(state: OverAllState) -> OverAllState:
         input_str = state["input_str"]
@@ -139,6 +200,33 @@ def build_main_graph(retrieve_graph,
         messages = [SystemMessage(content=system_content)] + list(history)
         messages.append(HumanMessage(content=user_content))
 
+        # 运行时工具筛选：规则命中 + 语义检索并集，只把候选工具暴露给 LLM 自主决策。
+        # build 期绑定的全量 tools 仍由 ToolNode 按 name 路由兜底，模型幻觉调用不会 KeyError
+        # 多轮增强（toolsTODO 7.4）：仅当输入含指代/承接信号时才拼接最近一轮 AI 回复，
+        # 弥补指代消解（如"继续""用刚才那个工具"）；话题切换时拼接反而污染检索信号
+        # （日志实证：query='软件工程\n好哒，我来帮你搜搜今天的新闻热点！' 命中了 git/fetch 等弱相关工具）
+        import re
+        last_ai = next(
+            (m.content for m in reversed(history) if isinstance(m, AIMessage) and m.content),
+            "",
+        )
+        if last_ai and re.search(r"(继续|刚才|那个|这个|它|同样|跟刚才)", input_str):
+            # 截断防 token 膨胀：AI 回复只取前 200 字符，主信号仍是用户输入（放最前）
+            filter_query = f"{input_str}\n{last_ai[:200]}"
+        else:
+            filter_query = input_str  # 话题切换/首轮：纯用户输入，检索信号纯净
+        selected_tools = tool_filter.select_tools(filter_query, tools)
+        if selected_tools:
+            model_with_tools = model.bind_tools(selected_tools)
+        else:
+            # 两路均未命中（tags 空 + 语义检索无果）：不 bind 空列表（OpenAI 兼容 API 会 400），
+            # 改用裸模型并注入提示，让 AI 如实告知无法处理，避免编造结果或假装已执行
+            messages.append(SystemMessage(
+                content="注意：当前没有可用的工具。若用户的请求依赖工具能力（如查文件、查数据库、"
+                        "操作外部服务），请如实告知暂时无法处理，不要编造结果或假装已执行。"
+            ))
+            model_with_tools = model
+
         # 流式生成：LangGraph 会通过 callback 机制自动捕获 model.stream 的每个 token，
         # 以 stream_mode="messages" 输出（前端逐片累加即打字机效果）。
         # 注意：节点不能返回生成器——langgraph 1.x 会把生成器当单条消息交给
@@ -150,14 +238,38 @@ def build_main_graph(retrieve_graph,
         # 工具调用：模型可能返回 tool_calls（跨 chunk 累积，取最后一个完整结果），
         # 有 tool_calls 时由 route_after_llm 交给 ToolNode 执行，再回到本节点生成最终回答
         tool_calls = chunks[-1].tool_calls if chunks else []
+        logger.info(
+            f"llm_node 生成完成：tool_calls={[tc['name'] for tc in tool_calls]} "
+            f"content_len={len(content)}"
+        )
         ai_reply = AIMessage(content=content, tool_calls=tool_calls)
 
-        return {"messages": [HumanMessage(content=input_str), ai_reply]}
+        # 本轮工具状态（memory_node 缓存策略的依据）：
+        # - 有 tool_calls → executed（工具将被 ToolNode 执行）
+        # - 无 tool_calls 但上一步已执行过工具（messages 末尾是 ToolMessage）→ executed
+        # - 无工具可用（筛选为空，裸模型兜底回答）→ unavailable
+        # - 其余（筛选出工具但模型未调用）→ idle，不参与 memory_node 缓存
+        tool_status = "idle"
+        if tool_calls:
+            tool_status = "executed"
+        elif history and isinstance(history[-1], ToolMessage):
+            tool_status = "executed"
+        elif not selected_tools:
+            tool_status = "unavailable"
+
+        return {"messages": [HumanMessage(content=input_str), ai_reply], "tool_status": tool_status}
 
     def memory_node(state: OverAllState, config: RunnableConfig, store: BaseStore) -> None:
         """将本轮对话中的长期信息提取并写入 store（按用户隔离）。"""
         user_id = config["configurable"].get("user_id", "default")
         namespace = ("rag_chat", user_id)
+
+        # 快速路径：idle 轮（筛选出工具但模型未调用，通常是简单闲聊）且无需检索时，
+        # 直接跳过记忆提取，避免 model.invoke() 阻塞 SSE 流导致前端消息超时失效。
+        # 用户名基础档案已由 llm_node 在回答前写入，闲聊场景通常无新增长期信息。
+        if state.get("tool_status") == "idle" and not state.get("needs_retrieval"):
+            logger.debug(f"memory_node 跳过（idle 闲聊轮）user_id={user_id}")
+            return
 
         # NO_INFO_MARKS 已移至 constant/prompt_constants.py 统一管理
 
@@ -220,14 +332,35 @@ def build_main_graph(retrieve_graph,
     def route_after_llm(state: OverAllState) -> str:
         """llm_node 之后：有工具调用则执行 ToolNode，否则进入记忆节点收尾"""
         last = state["messages"][-1]
-        return "tool_node" if getattr(last, "tool_calls", None) else "memory_node"
+        target = "tool_node" if getattr(last, "tool_calls", None) else "memory_node"
+        logger.info(f"llm_node 路由：{target}（last={type(last).__name__}）")
+        return target
 
     builder = StateGraph(state_schema=OverAllState)
     builder.add_node("classify_node", classify_node)
-    builder.add_node("retrieve_node", retrieve_node, cache_policy=CachePolicy(ttl=10))
+    # 节点级缓存：compile(cache=RedisCache) 已把缓存后端落到 Redis（见 chat_service.open），
+    # CachePolicy 只声明策略：TTL 常量化 + 自定义 key（仅 input_str，见 _retrieve_cache_key），
+    # 命中时直接复用检索结果，跳过向量检索与重排，降低 API/算力消耗。
+    builder.add_node(
+        "retrieve_node",
+        retrieve_node,
+        cache_policy=CachePolicy(ttl=CACHE_RETRIEVE_NODE_TTL, key_func=_retrieve_cache_key),
+    )
     builder.add_node("llm_node", llm_node)
-    builder.add_node("tool_node", tool_node)
-    builder.add_node("memory_node", memory_node)
+    # tool_node：仅工具真实执行后才有缓存条目（路由保证 tool_calls 非空才到达）；
+    # key 取工具名+参数（排除每次变化的调用 id），TTL 窗口内同调用复用结果
+    builder.add_node(
+        "tool_node",
+        tool_node,
+        cache_policy=CachePolicy(ttl=CACHE_TOOL_NODE_TTL, key_func=_tool_cache_key),
+    )
+    # memory_node：仅 executed/unavailable 轮写入缓存（见 _memory_cache_key），
+    # 命中时跳过 LLM 记忆提取与 store 写入，省一次模型调用
+    builder.add_node(
+        "memory_node",
+        memory_node,
+        cache_policy=CachePolicy(ttl=CACHE_MEMORY_NODE_TTL, key_func=_memory_cache_key),
+    )
 
     builder.add_edge(START, "classify_node")
     builder.add_conditional_edges(

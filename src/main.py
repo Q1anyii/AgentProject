@@ -1,54 +1,51 @@
+import asyncio
+import threading
 from contextlib import asynccontextmanager
-from datetime import timedelta
-from pathlib import Path
 
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse as FastAPIJSONResponse
 from loguru import logger
 
-from config import validate_config, get_env_int, load_mcp_server_configs, \
-    get_mcp_config_path, save_mcp_server_configs
-from context.user_context import CtxUser
-from constant.cache_constant import USER_TOKEN_KEY, USER_REFRESH_TOKEN_KEY
+from config import validate_config, load_mcp_server_configs
 from mcp_client.client import init_mcp_holders
-from schemas.request_schemas.chat_schema import ChatRequest
-from schemas.request_schemas.login_schema import *
-from schemas.request_schemas.user_schema import ProfileUpdateRequest, PasswordUpdateRequest, SystemPromptUpdateRequest, \
-    ThemeUpdateRequest, McpConfigUpdateRequest
+from mcp_client.mcp_server.agent_server import mcp
+from routers.auth_router import router as auth_router
+from routers.chat_router import router as chat_router
+from routers.mcp_router import router as mcp_router
+from routers.system_router import router as system_router
+from routers.user_router import router as user_router
 from service.cache_service import cache_service
 from service.chat_service import chat_service
-from service.user_profile_service import user_profile_service
 from service.file_upload_service import file_upload_service
-from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
-from mcp_client.mcp_server.agent_server import mcp
 from service.login_service import login_service
-from utils.response_util import Response
-from utils.jwt_utils import get_current_user, create_access_token, create_refresh_token, TokenData, \
-    REFRESH_TOKEN_EXPIRE_DAYS
-from utils.tools_util import safety_filter
+from service.user_profile_service import user_profile_service
+from utils.tools_util import safety_filter, tools_embedding
 
 # 注意：.env 加载由 config.py 统一处理，无需重复 load_dotenv()
 
 
-"""
-
-添加多模态功能，可读取用户上传的文件并自动解析成文档，细化拆分graph，完善tool_graph
-
-"""
-
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """应用生命周期：启动时初始化资源，关闭时释放资源。"""
 
     # ===== 启动阶段：yield 之前 =====
     # 第一步：校验必填环境变量，缺失时直接报错（快速失败，不拖到首个请求才 500）
     validate_config()
-    mcp_holders = await init_mcp_holders(load_mcp_server_configs())
+    # 工具常驻事件循环：MCP session 创建与工具调用必须同一循环——同步图在
+    # StreamingResponse 线程池执行工具时会临时新建 loop，跨循环调用 session 会
+    # 失败/挂起（Windows 下 mcp 库 cancel scope 泄漏还会注入 CancelledError 中断整图），
+    # 故 MCP 连接与工具调用全部提交到本循环（见 mcp_client.make_sync_tool）
+    tool_loop = asyncio.new_event_loop()
+    threading.Thread(target=tool_loop.run_forever, daemon=True, name="mcp-tool-loop").start()
+    mcp_holders = asyncio.run_coroutine_threadsafe(
+        init_mcp_holders(load_mcp_server_configs()), tool_loop
+    ).result(timeout=35)
     mcp_tools = [t for h in mcp_holders for t in h.tools]
     filtered_tools = []
     if mcp_tools:
         filtered_tools = safety_filter(mcp_tools)
-        logger.success(f"已加载 MCP 工具：{[t.name for t in filtered_tools]}")
+        tools_embedding(filtered_tools)
+        logger.success(f"已加载{len(filtered_tools)}个MCP 工具，共{len(mcp_holders)}类")
     logger.info("正在初始化 LangGraph 资源...")
     chat_service.open(filtered_tools)
     login_service.open()
@@ -59,15 +56,24 @@ async def lifespan(app: FastAPI):
     yield                                # ===== 应用运行期间（yield 挂起）=====
     # ===== 关闭阶段：yield 之后 =====
     logger.info("正在释放资源...")
-    # MCP 子进程连接需在服务关闭前释放（工具闭包依赖 session）
-    for holder in mcp_holders:
-        await holder.close()
+    # MCP 子进程连接需在服务关闭前释放（工具闭包依赖 session）；连接创建在工具
+    # 常驻循环上，关闭必须提交到该循环，否则跨循环 await 报错
+    if mcp_holders:
+        asyncio.run_coroutine_threadsafe(_close_mcp_holders(mcp_holders), tool_loop).result(timeout=10)
+    tool_loop.call_soon_threadsafe(tool_loop.stop)
     chat_service.close(timeout=10)
     login_service.close(timeout=10)
     cache_service.close()
     user_profile_service.close()
     file_upload_service.close()
     logger.info("资源已释放")
+
+
+async def _close_mcp_holders(holders: list) -> None:
+    """在工具常驻循环内按序关闭全部 MCP 连接（连接/工具调用同循环，关闭也必须同循环）。"""
+    for holder in holders:
+        await holder.close()
+
 
 app = FastAPI(title="Mitta AI", lifespan=lifespan)
 
@@ -83,9 +89,6 @@ app.add_middleware(RateLimitMiddleware)
 # ============================================================
 # 全局异常处理：统一返回结构化错误，避免暴露堆栈信息
 # ============================================================
-from fastapi import Request
-from fastapi.responses import JSONResponse as FastAPIJSONResponse
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -116,391 +119,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
-# 资源归属校验：只允许本人访问自己的记忆/会话，管理员角色放行
-# FastAPI 会自动把路径参数 user_id 注入本依赖（必须定义在使用它的路由之前）
-def require_self_or_admin(user_id: str, current_user: TokenData = Depends(get_current_user)):
-    if str(current_user.user_id) != user_id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="无权访问该用户资源")
-    return current_user
-
-@app.post("/api/chat/")
-def chat(request_body: ChatRequest, current_user: TokenData = Depends(get_current_user)):
-    query = request_body.query
-    thread_id = request_body.thread_id
-    # 会话归属校验（与 history/delete 一致）：会话已存在但非本人所有时拒绝，
-    # 否则任意用户可用他人 thread_id 发消息，LangGraph 会用当前用户覆盖该会话归属 metadata 造成劫持
-    owner = chat_service.get_thread_user_id(thread_id)
-    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="无权使用该会话")
-    # 认证在路由层完成：JWT 解析出 user_id/username 后查库，构造请求级用户上下文（供图内工具读取）
-    user_row = login_service.get_user_by_id(str(current_user.user_id))
-    user_info = (
-        CtxUser(
-            uid=user_row["id"],
-            user_id=user_row["user_id"],
-            password=None,  # 敏感字段不注入，工具无法访问
-            username=current_user.username,  # 直接取 JWT 解析出的 username（token → 解析 → 上下文）
-            create_time=user_row["create_time"],
-            update_time=user_row["update_time"],
-        )
-        if user_row
-        else None
-    )
-    event_stream = chat_service.stream(current_user.user_id, thread_id, query, user_info=user_info)
-    return StreamingResponse(event_stream, media_type="text/event-stream")
-
-@app.get("/api/chat/{thread_id}/history")
-def get_history_session(thread_id: str, current_user: TokenData = Depends(get_current_user)):
-    # 会话归属校验：会话存在但非本人所有时拒绝（管理员放行）
-    owner = chat_service.get_thread_user_id(thread_id)
-    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="无权访问该会话")
-    history_session = chat_service.get_history_session(thread_id)
-    return history_session
-
-@app.get("/api/users/{user_id}/memory")
-def get_memory(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    memory = chat_service.get_memory(user_id)
-    return memory
-
-@app.delete("/api/chat/{thread_id}")
-def delete_session_by_id(thread_id: str, current_user: TokenData = Depends(get_current_user)):
-    # 会话归属校验：会话存在但非本人所有时拒绝（管理员放行）
-    owner = chat_service.get_thread_user_id(thread_id)
-    if owner and owner != str(current_user.user_id) and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="无权删除该会话")
-    flag, response = chat_service.delete_session_by_id(thread_id)
-    if flag:
-        return Response.success(response)
-    else:
-        return Response.failed(response)
-
-
-@app.get("/api/users/{user_id}/sessions")
-def get_sessions_by_user_id(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    sessions = chat_service.get_user_sessions(user_id)
-    return sessions
-
-@app.get("/health")
-def check_db_health():
-    status = chat_service.check_db_health()
-    return status
-
-# ===== 认证接口：MySQL 用户表校验 =====
-
-# 修复：使用 get_env_int 提供默认值 15，避免环境变量缺失时 int(None) 报错
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = get_env_int("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 15)
-
-@app.post("/api/login")
-def login(request_body: LoginRequest):
-    user_id = request_body.userId
-    password = request_body.password
-    user_info = login_service.login(user_id, password)
-    # login 返回 dict 才是成功：密码错误/用户不存在时返回的是字符串提示
-    if not isinstance(user_info, dict):
-        return Response.failed(user_info or "用户 ID 或密码错误")
-    token = create_access_token(
-        data={
-            "sub": str(user_info["user_id"] + ":" + user_info["username"]),
-            "role": user_info.get("role", "学员"),  # 管理员角色用于资源越权放行
-        },
-        expires_delta=timedelta(minutes=int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES)),
-    )
-    # 隐式 refresh token：只存 Redis 不下发前端，access 过期时由后端（jwt_utils）自动续签
-    refresh_token = create_refresh_token(
-        data={"sub": str(user_info["user_id"] + ":" + user_info["username"])}
-    )
-    r = cache_service.redis
-    # setex 第二参数单位是「秒」：access 配置为分钟需 ×60
-    r.setex(USER_TOKEN_KEY.format(user_id=user_id), int(JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60, token)
-    r.setex(
-        USER_REFRESH_TOKEN_KEY.format(user_id=user_id),
-        REFRESH_TOKEN_EXPIRE_DAYS * 86400,
-        refresh_token,
-    )
-    return {"ok": True, "token": token, "user_info": user_info}
-
-
-@app.post("/api/register")
-def register(request_body: RegisterRequest):
-    # 显式传递参数，替代原 *request_body 隐式展开
-    flag, response = login_service.register(
-        username=request_body.userName,
-        user_id=request_body.userId,
-        password=request_body.password
-    )
-    if flag:
-        return Response.success(response)
-    else:
-        return Response.failed(response)
-
-
-@app.post("/api/recover")
-def recover(request_body: RecoverRequest):
-    user_id = request_body.userId
-    new_password = request_body.newPassword
-    response = login_service.recover(user_id, new_password)
-    if not response:
-        return Response.failed("注册失败")
-    elif response == 1:
-        return Response.success()
-    else:
-        return Response.failed(response)
-
-
-
-@app.get("/api/users/{user_id}/profile")
-def get_user_profile(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    """获取用户个人信息（username, avatar, assistant_style, theme）。"""
-    profile = user_profile_service.get_profile(user_id)
-    # 不返回 system_prompt 和 mcp_config（有专门接口），避免大字段
-    if profile:
-        return {
-            "ok": True,
-            "data": {
-                "user_id": profile.get("user_id"),
-                "username": profile.get("username"),
-                "avatar": profile.get("avatar"),
-                "assistant_style": profile.get("assistant_style"),
-                "theme": profile.get("theme", "default"),
-            }
-        }
-    return {"ok": True, "data": None}
-
-
-@app.put("/api/users/{user_id}/profile")
-def update_user_profile(user_id: str, request_body: ProfileUpdateRequest,
-                        current_user: TokenData = Depends(require_self_or_admin)):
-    """更新用户个人信息（username, avatar, assistant_style）。"""
-    success = user_profile_service.update_basic_info(
-        user_id=user_id,
-        username=request_body.username,
-        avatar=request_body.avatar,
-        assistant_style=request_body.assistant_style,
-    )
-    if success:
-        return Response.success("个人信息更新成功")
-    return Response.failed("没有需要更新的字段")
-
-
-@app.put("/api/users/{user_id}/password")
-def update_user_password(user_id: str, request_body: PasswordUpdateRequest,
-                         current_user: TokenData = Depends(require_self_or_admin)):
-    """修改用户密码（需验证原密码）。"""
-    # 先验证原密码
-    user_info = login_service.login(user_id, request_body.old_password)
-    if not isinstance(user_info, dict):
-        return Response.failed("原密码错误")
-    # 修改密码（复用 recover 逻辑）
-    result = login_service.recover(user_id, request_body.new_password)
-    if result == 1:
-        return Response.success("密码修改成功")
-    return Response.failed(result or "密码修改失败")
-
-
-@app.get("/api/users/{user_id}/system-prompt")
-def get_user_system_prompt_api(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    """获取用户自定义 system prompt。"""
-    content = user_profile_service.get_system_prompt(user_id)
-    return {"ok": True, "data": {"content": content or ""}}
-
-
-@app.put("/api/users/{user_id}/system-prompt")
-def update_user_system_prompt(user_id: str, request_body: SystemPromptUpdateRequest,
-                               current_user: TokenData = Depends(require_self_or_admin)):
-    """更新用户自定义 system prompt（空字符串表示清除）。
-
-    更新后自动失效该用户所有会话的检索缓存：
-    system_prompt 变更会影响 AI 对检索结果的使用方式，旧缓存的检索结果
-    可能与新 prompt 不匹配，需按 thread_id 清除 Redis 检索缓存。
-    """
-    # 字数限制：最多 3000 字
-    if len(request_body.content) > 3000:
-        return Response.failed("自定义设定不能超过 3000 字")
-    user_profile_service.update_system_prompt(user_id, request_body.content)
-
-    # 失效该用户所有会话的检索缓存（仅 thread_id 维度的检索缓存，不影响 JWT/登录态等其他缓存）
-    try:
-        sessions = chat_service.get_user_sessions(user_id)
-        thread_ids = [s["thread_id"] for s in sessions if s.get("thread_id")]
-        if thread_ids:
-            cache_service.clear_user_thread_caches(user_id, thread_ids)
-    except Exception as e:
-        # 缓存清除失败不影响主流程：system_prompt 已更新成功，缓存会在 TTL 后自然过期
-        logger.warning(f"更新 system_prompt 后清除检索缓存失败 user_id={user_id}: {e}")
-
-    return Response.success("自定义设定更新成功")
-
-
-@app.get("/api/users/{user_id}/theme")
-def get_user_theme(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    """获取用户主题配置。"""
-    theme = user_profile_service.get_theme(user_id)
-    return {"ok": True, "data": {"theme": theme}}
-
-
-@app.put("/api/users/{user_id}/theme")
-def update_user_theme(user_id: str, request_body: ThemeUpdateRequest,
-                      current_user: TokenData = Depends(require_self_or_admin)):
-    """更新用户主题配置。"""
-    allowed_themes = ["default", "dark", "ocean", "sunset", "forest", "lavender"]
-    if request_body.theme not in allowed_themes:
-        return Response.failed(f"不支持的主题，可选：{', '.join(allowed_themes)}")
-    user_profile_service.update_theme(user_id, request_body.theme)
-    return Response.success("主题更新成功")
-
-
-@app.get("/api/users/{user_id}/mcp")
-def get_user_mcp_config(user_id: str, current_user: TokenData = Depends(require_self_or_admin)):
-    """获取用户 MCP 服务器配置。"""
-    config = user_profile_service.get_mcp_config(user_id)
-    return {"ok": True, "data": {"mcp_servers": config}}
-
-
-@app.put("/api/users/{user_id}/mcp")
-def update_user_mcp_config(user_id: str, request_body: McpConfigUpdateRequest,
-                            current_user: TokenData = Depends(require_self_or_admin)):
-    """更新用户 MCP 服务器配置（JSON 数组，每个元素是一个 dict）。"""
-    try:
-        user_profile_service.update_mcp_config(user_id, request_body.mcp_servers)
-        return Response.success("MCP 配置更新成功")
-    except (ValueError, TypeError) as e:
-        return Response.failed(f"MCP 配置格式错误：{e}")
-
-
 # ============================================================
-# 全局 MCP 配置接口（本地文件存储）
-# 作用：MCP 配置存储在用户本地 JSON 文件中，用户可指定路径
-# 读写均走该文件，替代原有的数据库存储方式
+# 路由注册：按模块拆分到 routers/ 目录
+# 注意：system_router 必须最后注册（SPA 兜底路由 /{full_path:path} 会匹配所有未捕获路径）
 # ============================================================
-@app.get("/api/mcp/config")
-def get_global_mcp_config(current_user: TokenData = Depends(get_current_user)):
-    """获取全局 MCP 配置（从本地文件读取）。
-
-    Returns:
-        { ok, data: { path, mcp_servers } }
-    """
-    config_path = get_mcp_config_path()
-    mcp_servers = load_mcp_server_configs()
-    return {"ok": True, "data": {"path": config_path, "mcp_servers": mcp_servers}}
-
-
-@app.put("/api/mcp/config")
-def update_global_mcp_config(
-    request_body: dict,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """更新全局 MCP 配置（保存到本地文件）。
-
-    Request body:
-        - path: 配置文件路径（可选，不指定则使用当前路径）
-        - mcp_servers: MCP 配置列表（必填）
-
-    Returns:
-        { ok, detail, data: { path } }
-    """
-    mcp_servers = request_body.get("mcp_servers")
-    path = request_body.get("path")
-
-    if mcp_servers is None:
-        return Response.failed("缺少 mcp_servers 字段")
-    if not isinstance(mcp_servers, list):
-        return Response.failed("mcp_servers 必须是 JSON 数组")
-
-    try:
-        saved_path = save_mcp_server_configs(mcp_servers, path)
-        return {
-            "ok": True,
-            "detail": "MCP 配置已保存到本地文件，重启后端服务后生效",
-            "data": {"path": saved_path}
-        }
-    except ValueError as e:
-        return Response.failed(str(e))
-
-
-# ============================================================
-# 文件上传接口
-# ============================================================
-@app.post("/api/chat/upload")
-async def upload_file(file: UploadFile = File(...),
-                      thread_id: Optional[str] = Form(None),
-                      current_user: TokenData = Depends(get_current_user)):
-    """上传文件（多种格式，base64 存储在 MySQL）。
-
-    Args:
-        file: 上传的文件
-        thread_id: 关联会话 ID（可选，None 表示全局文件）
-    """
-    content = await file.read()
-    try:
-        result = file_upload_service.save_file(
-            user_id=str(current_user.user_id),
-            file_name=file.filename,
-            file_content_bytes=content,
-            file_type=file.content_type,
-            thread_id=thread_id,
-        )
-        return {"ok": True, "data": result}
-    except ValueError as e:
-        return Response.failed(str(e))
-
-
-@app.get("/api/users/{user_id}/files")
-def list_user_files(user_id: str, thread_id: Optional[str] = None,
-                     current_user: TokenData = Depends(require_self_or_admin)):
-    """列出用户上传的文件。"""
-    files = file_upload_service.list_files(user_id, thread_id)
-    return {"ok": True, "data": files}
-
-
-@app.delete("/api/files/{file_id}")
-def delete_user_file(file_id: int, current_user: TokenData = Depends(get_current_user)):
-    """删除用户上传的文件。"""
-    success = file_upload_service.delete_file(file_id, str(current_user.user_id))
-    if success:
-        return Response.success("文件删除成功")
-    return Response.failed("文件不存在或无权删除")
-
-
-# ============================================================
-# 停止回复接口（前端暂停按钮调用）
-# 注意：LangGraph 同步 stream 无法在服务端主动中断，
-# 此接口用于前端标记停止状态，前端通过关闭 EventSource/AbortController 停止接收
-# ============================================================
-@app.post("/api/chat/{thread_id}/stop")
-def stop_chat_response(thread_id: str, current_user: TokenData = Depends(get_current_user)):
-    """标记停止当前会话的回复生成。
-
-    实际停止由前端通过 AbortController 关闭 SSE 连接实现，
-    此接口用于记录停止状态和后续可能的服务端清理。
-    """
-    logger.info(f"用户请求停止回复 thread_id={thread_id}, user_id={current_user.user_id}")
-    return {"ok": True, "message": "已标记停止，前端将关闭连接"}
-
-
-# ===== 前端静态托管（开发模式：localhost:8000 直达页面，免 Nginx）=====
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "resources" / "frontend"
-
-# 认证页面（SPA 路由）：Vue Router history 模式无 #，直链/刷新 /api/login 等路径时
-# 由后端直接返回 index.html，交给前端路由渲染对应认证组件（nginx 走 /api/ 代理同样生效）
-@app.get("/api/login")
-@app.get("/api/register")
-@app.get("/api/recover")
-def auth_page():
-    return FileResponse(FRONTEND_DIR / "index.html")
-
-# SPA 兜底（替代 mount 静态托管，需注册在所有 API 路由之后）：
-#   - 静态资源（favicon.png 等真实文件）直接返回文件
-#   - /api/* 未知路径返回 404 JSON（API 路由已在上面优先匹配）
-#   - 其余路径（/chat 等前端 history 路由）返回 index.html，直链/刷新不再 404 空白
-@app.get("/{full_path:path}")
-def spa_or_static(full_path: str):
-    file = FRONTEND_DIR / full_path
-    if full_path and file.is_file():
-        return FileResponse(file)
-    if full_path.startswith("api/"):
-        return JSONResponse({"detail": "Not Found"}, status_code=404)
-    return FileResponse(FRONTEND_DIR / "index.html")
+app.include_router(auth_router)
+app.include_router(chat_router)
+app.include_router(user_router)
+app.include_router(mcp_router)
+app.include_router(system_router)  # 必须最后注册
 
 
 if __name__ == "__main__":

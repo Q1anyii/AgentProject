@@ -59,13 +59,5 @@
       "@modelcontextprotocol/server-memory"
     ],
     "cwd": "E:/工作文件/AgentProject/resources/mcp_memory"
-  },
-  {
-    "name": "crawl4ai",
-    "type": "stdio",
-    "command": "uvx",
-    "args": [
-      "crawl4ai-mcp"
-    ]
   }
 ]

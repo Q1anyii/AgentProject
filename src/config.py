@@ -187,8 +187,8 @@ def load_mcp_server_configs() -> list[dict]:
             continue
         validated.append(item)
         # （路径: {config_path}）
-    logger.info(f"MCP 服务器配置加载完成，共 {len(validated)} 个："
-                f"{[c.get('name', c.get('type')) for c in validated]}")
+    # logger.info(f"MCP 服务器配置加载完成，共 {len(validated)} 个："
+    #             f"{[c.get('name', c.get('type')) for c in validated]}")
     _mcp_config_cache = validated
     return validated
 

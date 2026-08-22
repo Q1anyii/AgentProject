@@ -6,7 +6,7 @@ import chromadb
 from pathlib import Path
 from langgraph.store.postgres import PostgresStore
 from psycopg_pool import ConnectionPool
-from langchain_core.messages import BaseMessage, AIMessageChunk
+from langchain_core.messages import BaseMessage, AIMessageChunk, ToolMessage
 from loguru import logger
 from langgraph.cache.redis import RedisCache  # 可能需要 langgraph-checkpoint-redis 扩展
 
@@ -55,6 +55,9 @@ class ChatService:
         self.store = PostgresStore(self.pool)  # ← self.
         self.checkpointer.setup()
         self.store.setup()
+        # 图级缓存后端：compile(cache=...) 传入 RedisCache 后，图中所有 CachePolicy 标记的
+        # 节点（如 retrieve_node）命中/写入都走 Redis（键前缀 langgraph:cache:，带 TTL），
+        # 多 worker 间共享；Redis 不可用时 RedisCache 内部静默降级为不缓存
         self.cache = RedisCache(cache_service.redis)  # ← self.，且 compile 用它
         self.retrieve_graph = build_retrieve_graph(self.vector_store)   # 只 build 一次，替代 @lru_cache
         self.main_graph = build_main_graph(  # 改：显式传参
@@ -121,28 +124,44 @@ class ChatService:
             # 包括 classify_node 的 yes/no 与 memory_node 的记忆提取输出，
             # 必须按 meta["langgraph_node"] 过滤，只输出 llm_node 的增量，
             # 否则分类器的 "no" 会混入流式回答出现在前端。
+            # 同时捕获 tool_call 开始/结束事件，供前端显示工具调用加载界面。
             for chunk, meta in self.main_graph.stream(
                     {"input_str": input_str},
                     config=config,
                     stream_mode="messages",
             ):
-                if meta.get("langgraph_node") != "llm_node":
-                    continue
-                if isinstance(chunk, AIMessageChunk) and chunk.content:
-                    # content 可能是字符串或 list（多模态/工具消息），统一归一为纯文本，
-                    # 否则前端 typeof === 'string' 检查失败会静默跳过，导致整轮流式不输出
-                    content = chunk.content
-                    if isinstance(content, list):
-                        content = "".join(
-                            part.get("text", "") if isinstance(part, dict) else str(part)
-                            for part in content
-                        )
-                    if content:
-                        yield f"data: {json.dumps({'content': content})}\n\n"
+                node = meta.get("langgraph_node")
+                # llm_node：输出内容 + 检测工具调用开始
+                if node == "llm_node":
+                    if isinstance(chunk, AIMessageChunk):
+                        # 检测工具调用开始：AIMessageChunk 含 tool_calls 字段
+                        if chunk.tool_calls:
+                            for tc in chunk.tool_calls:
+                                yield f"data: {json.dumps({'tool_call_start': {'name': tc.get('name', ''), 'args': tc.get('args', {})}})}\n\n"
+                        # 输出文本内容
+                        if chunk.content:
+                            content = chunk.content
+                            if isinstance(content, list):
+                                content = "".join(
+                                    part.get("text", "") if isinstance(part, dict) else str(part)
+                                    for part in content
+                                )
+                            if content:
+                                yield f"data: {json.dumps({'content': content})}\n\n"
+                # tool_node：工具执行结果，发送工具调用结束事件
+                elif node == "tool_node":
+                    if isinstance(chunk, ToolMessage):
+                        yield f"data: {json.dumps({'tool_call_end': {'name': chunk.name, 'content': str(chunk.content)[:200]}})}\n\n"
             yield f"data: [DONE]\n\n"
         except GeneratorExit:
             # 客户端断开连接时 StreamingResponse 会关闭生成器，这里静默退出即可
             raise
+        except Exception as e:
+            # 图执行异常（工具执行跨事件循环/checkpoint 序列化等）：记录完整堆栈并
+            # 向前端推送错误事件，避免 SSE 静默断流导致前端报"发送消息失败"而日志无迹
+            logger.exception(f"对话流生成异常（thread_id={thread_id}）：{e}")
+            yield f"data: {json.dumps({'error': str(e), 'error_type': type(e).__name__})}\n\n"
+            yield f"data: [DONE]\n\n"
 
     def get_history_session(self, thread_id: str):
         config = {

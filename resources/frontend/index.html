@@ -787,6 +787,13 @@
             font-weight: 600;
             font-size: 0.875rem;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+        .user-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
         }
 
         .user-info {
@@ -1044,6 +1051,13 @@
             flex-shrink: 0;
             font-size: 0.8125rem;
             font-weight: 600;
+            overflow: hidden;
+        }
+        .message-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
         }
 
         .message.user .message-avatar {
@@ -1124,6 +1138,42 @@
         .thinking-text {
             font-size: 0.875rem;
             color: var(--text-muted);
+        }
+
+        /* 工具调用加载界面 */
+        .tool-call-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .tool-call-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: toolCallSpin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes toolCallSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        .tool-call-text {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .tool-call-text strong {
+            color: var(--accent);
+            font-weight: 600;
         }
 
         /* ============================================================
@@ -1644,21 +1694,25 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
-            margin-top: 8px;
+            margin-bottom: 10px;
+            justify-content: flex-start;
         }
         .uploaded-file-tag {
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 10px;
+            padding: 5px 12px;
             background: var(--accent-light);
             color: var(--accent);
             border-radius: var(--radius-full);
             font-size: 12px;
+            max-width: 200px;
         }
         .uploaded-file-tag .remove {
             cursor: pointer;
             opacity: 0.7;
+            font-size: 14px;
+            line-height: 1;
         }
         .uploaded-file-tag .remove:hover {
             opacity: 1;
@@ -1908,7 +1962,7 @@
             }
         }
 
-        async function apiChat(query, threadId, onStream, signal) {
+        async function apiChat(query, threadId, onStream, signal, onToolCall) {
             const response = await fetch(`${API_BASE}/api/chat/`, {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -1953,6 +2007,16 @@
                         chunk = JSON.parse(payload);
                     } catch {
                         continue; // 跳过损坏的 SSE 数据，不中断整个流
+                    }
+                    // 服务端图执行异常（工具执行失败等）：抛给调用方展示，不再静默断流
+                    if (chunk.error) throw new Error(chunk.error);
+                    // 工具调用开始事件：通知前端显示加载界面
+                    if (chunk.tool_call_start && onToolCall) {
+                        onToolCall({ type: 'start', name: chunk.tool_call_start.name, args: chunk.tool_call_start.args });
+                    }
+                    // 工具调用结束事件：通知前端隐藏加载界面
+                    if (chunk.tool_call_end && onToolCall) {
+                        onToolCall({ type: 'end', name: chunk.tool_call_end.name, content: chunk.tool_call_end.content });
                     }
                     const text = extractContentText(chunk.content);
                     if (text) {
@@ -2360,7 +2424,10 @@
                                 </div>
                                 <div class="user-card">
                                     <button class="user-avatar-btn" @click="toggleUserMenu">
-                                        <div class="user-avatar">{{ userAvatar }}</div>
+                                        <div class="user-avatar">
+                                            <img v-if="user?.avatar" :src="user.avatar" alt="头像">
+                                            <span v-else>{{ userAvatar }}</span>
+                                        </div>
                                         <div class="user-info">
                                             <div class="user-name">{{ user?.name || '用户' }}</div>
                                             <div class="user-role">{{ user?.role || '学员' }}</div>
@@ -2430,7 +2497,11 @@
                                     class="message"
                                     :class="msg.role"
                                 >
-                                    <div class="message-avatar" aria-hidden="true">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
+                                    <div class="message-avatar" aria-hidden="true">
+                                        <img v-if="msg.role === 'assistant'" src="/favicon.png" alt="AI">
+                                        <img v-else-if="user?.avatar" :src="user.avatar" alt="用户">
+                                        <span v-else>{{ msg.role === 'user' ? '我' : 'AI' }}</span>
+                                    </div>
                                     <div class="message-content-wrapper">
                                         <div class="message-meta">
                                             <span>{{ msg.role === 'user' ? '您' : 'AI 助手' }}</span>
@@ -2446,6 +2517,11 @@
                                                 <div class="thinking-dots"><span></span><span></span><span></span></div>
                                                 <span class="thinking-text">正在思考...</span>
                                             </div>
+                                            <!-- 工具调用加载界面：当模型正在调用工具时显示 -->
+                                            <div v-if="currentToolCall && msg === messages[messages.length - 1]" class="tool-call-indicator">
+                                                <div class="tool-call-spinner"></div>
+                                                <span class="tool-call-text">正在调用工具：<strong>{{ currentToolCall.name }}</strong></span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2453,6 +2529,14 @@
                         </div>
 
                         <div class="input-area">
+                            <!-- 已上传文件列表（输入框上方，从左到右排列） -->
+                            <div v-if="uploadedFiles.length > 0" class="uploaded-files">
+                                <span v-for="(file, idx) in uploadedFiles" :key="idx" class="uploaded-file-tag">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                    {{ file.name }}
+                                    <span class="remove" @click="removeUploadedFile(idx)">×</span>
+                                </span>
+                            </div>
                             <div class="input-card">
                                 <textarea
                                     v-model="inputText"
@@ -2489,14 +2573,6 @@
                                         <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
                                     </button>
                                 </div>
-                            </div>
-                            <!-- 已上传文件列表 -->
-                            <div v-if="uploadedFiles.length > 0" class="uploaded-files">
-                                <span v-for="(file, idx) in uploadedFiles" :key="idx" class="uploaded-file-tag">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                                    {{ file.name }}
-                                    <span class="remove" @click="removeUploadedFile(idx)">×</span>
-                                </span>
                             </div>
                             <p class="input-hint">按 Enter 发送，Shift + Enter 换行</p>
                         </div>
@@ -2661,6 +2737,7 @@
                 const inputText = ref('');
                 const isLoading = ref(false);
                 const streaming = ref(false);
+                const currentToolCall = ref(null);  // 当前正在调用的工具 {name, args}，用于显示加载界面
                 const sidebarOpen = ref(false);
                 const healthStatus = ref('online');
                 const messagesContainer = ref(null);
@@ -2931,11 +3008,19 @@
                                     saveMessages();
                                 }, 500);
                             }
-                        }, abortController.value.signal);
+                        }, abortController.value.signal, (toolEvent) => {
+                            // 工具调用事件：显示/隐藏加载界面
+                            if (toolEvent.type === 'start') {
+                                currentToolCall.value = { name: toolEvent.name, args: toolEvent.args };
+                            } else if (toolEvent.type === 'end') {
+                                currentToolCall.value = null;
+                            }
+                        });
 
                         // 流结束：清掉未触发的节流器，确保最终内容一次性落库渲染
                         if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
                         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+                        currentToolCall.value = null;  // 清除工具调用状态
                         aiMsg.content = answer || '（无回复）';
                         streaming.value = false;
                         saveMessages();
@@ -2969,6 +3054,7 @@
                     } finally {
                         isLoading.value = false;
                         streaming.value = false;
+                        currentToolCall.value = null;  // 确保异常时也清除工具调用状态
                         focusInput();
                     }
                 };
@@ -3366,7 +3452,7 @@
 
                 return {
                     user, sessions, currentThreadId, messages, inputText,
-                    isLoading, streaming, sidebarOpen, healthStatus, healthText,
+                    isLoading, streaming, currentToolCall, sidebarOpen, healthStatus, healthText,
                     messagesContainer, textarea, fileInput, quickQuestions,
                     currentSessionTitle, userAvatar, greetingName, canSend,
                     createNewSession, switchSession, deleteSession,

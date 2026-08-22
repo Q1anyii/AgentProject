@@ -45,6 +45,7 @@
 如果工具具有明确的分类或标签，可以先根据用户查询中的关键词进行粗筛。
 
 **示例**：  
+
 - 查询包含“天气”、“温度” → 保留 `tags` 包含 `weather` 的工具。  
 - 查询包含“计算”、“加” → 保留 `tags` 包含 `math` 的工具。  
 - 如果无法判断分类，则跳过此层，直接进入向量检索。
@@ -95,6 +96,7 @@ vectorstore = FAISS.from_texts(
 ```
 
 **优化点**：
+
 - 使用异步批量嵌入加快构建速度。
 - 向量索引可以持久化到磁盘，避免每次启动重新计算。
 - 若工具频繁更新，可使用支持增量添加的向量库（如 Chroma、Qdrant）。
@@ -116,6 +118,7 @@ def retrieve_tools(query: str, k: int = 5) -> List[Tool]:
 ```
 
 **关键参数**：
+
 - `k`：检索数量，通常取 5~20。太少可能漏掉相关工具，太多则失去筛选意义。
 - `threshold`：相似度阈值，用于过滤低分工具。需要根据嵌入模型和工具集特点调整。
 
@@ -139,6 +142,7 @@ relevant_tools = retriever.invoke(user_query)  # 直接返回 List[BaseTool]
 如果第二层检索出的工具仍然较多（例如 20 个），或者需要更精确地判断用户意图，可以引入一个轻量级 LLM 进行二次筛选。
 
 **做法**：
+
 - 使用一个便宜快速的模型（如 GPT-3.5-turbo、Claude Haiku）或本地小模型。
 - 输入：用户查询 + 候选工具列表（只包含名称和简短描述）。
 - 输出：需要使用的工具名称列表（JSON 格式）。
@@ -157,6 +161,7 @@ Available tools:
 ```
 
 **使用场景**：
+
 - 工具之间语义高度重叠，向量检索容易混淆。
 - 需要处理多步推理（用户请求可能涉及多个工具）。
 - 对成本不敏感，但对工具选择准确性要求极高。
@@ -228,14 +233,14 @@ class ToolSelector:
         candidates = self._rule_filter(query)
         if len(candidates) <= k:
             return candidates
-        
+
         # 第二层：向量检索
         retrieved = self._vector_retrieve(query, k=k*2)  # 多取一些供精筛
-        
+
         # 第三层：LLM 精筛
         if self.selector_llm and len(retrieved) > k:
             retrieved = self._llm_refine(query, retrieved)
-        
+
         return retrieved[:k]
 
     def _rule_filter(self, query):

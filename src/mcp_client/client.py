@@ -34,6 +34,61 @@ from mcp.client.sse import sse_client
 from mcp_client.mcp_tool_holder import McpToolHolder
 
 
+# 工具调用超时（秒）：MCP 工具执行超时抛 TimeoutError，由 ToolNode 转错误消息，
+# 不会中断整条对话链路；远程工具较慢时可按需调大
+TOOL_CALL_TIMEOUT = 30
+
+# MCP 服务器名 → 规则层 tags 映射：让 rule_based_filter 能根据 query 关键词命中对应工具
+# tags 含中英文关键词，覆盖用户常见表述（如"写文件""读目录""git提交"）
+SERVER_TAGS = {
+    "filesystem": ["文件", "目录", "读写", "读", "写", "file", "filesystem", "folder", "path", "路径"],
+    "git": ["git", "提交", "版本", "仓库", "commit", "diff", "log", "分支", "branch"],
+    "fetch": ["网页", "url", "抓取", "fetch", "http", "链接", "网站"],
+    "sqlite": ["数据库", "sql", "查询", "sqlite", "db", "数据"],
+    "sequential-thinking": ["思考", "推理", "分步", "排错", "分析", "thinking"],
+    "memory": ["记忆", "知识图谱", "实体", "关系", "memory", "记录"],
+    "context7": ["文档", "api", "库", "版本", "参数", "context7"],
+    "crawl4ai": ["爬虫", "网页", "pdf", "抓取", "crawl", "爬取"],
+}
+
+
+def make_sync_tool(async_tool: BaseTool, loop: asyncio.AbstractEventLoop, timeout: int = TOOL_CALL_TIMEOUT, server_name: str = "") -> BaseTool:
+    """async 工具 → sync 工具：调用提交到工具常驻事件循环。
+
+    langchain_mcp_adapters 的 load_mcp_tools 生成 async 工具，闭包捕获绑定
+    创建时事件循环的 ClientSession。同步图（ToolNode）在线程池线程执行时会
+    临时新建事件循环调用 async 工具，跨循环操作 session 会失败/挂起
+    （Windows 下 mcp 库 cancel scope 泄漏还会注入 CancelledError 中断整图）。
+    包装后所有调用提交到与 session 同循环的工具常驻循环，规避跨循环；
+    timeout 防挂死，超时由 ToolNode 转错误消息，不中断对话链路。
+
+    server_name：注入基于服务器名的 tags，供 ToolFilter 规则层命中（MCP 工具原生无 tags）。
+    """
+    from langchain_core.tools import StructuredTool
+
+    async def _ainvoke(**kwargs):
+        return await async_tool.ainvoke(kwargs)
+
+    def _invoke(**kwargs):
+        future = asyncio.run_coroutine_threadsafe(_ainvoke(**kwargs), loop)
+        return future.result(timeout=timeout)
+
+    # 基于服务器名注入 tags：规则层 rule_based_filter 靠 tags 命中，MCP 工具原生无 tags
+    tags = list(SERVER_TAGS.get(server_name, []))
+    # 合并原工具的 tags（如有）
+    if getattr(async_tool, "tags", None):
+        tags = list(set(tags + list(async_tool.tags)))
+
+    return StructuredTool.from_function(
+        func=_invoke,
+        name=async_tool.name,
+        description=async_tool.description or "",
+        args_schema=async_tool.args_schema,
+        metadata=async_tool.metadata or {},  # 保留 destructiveHint 等安全元数据
+        tags=tags if tags else None,
+    )
+
+
 class McpServerConnection:
     """连接单个 MCP 服务器：生命周期管理 + 工具加载（每个连接独立 AsyncExitStack）"""
 
@@ -117,6 +172,11 @@ class McpServerConnection:
 
         # LangChain 工具：适配器自动完成 JSON Schema → pydantic 转换，闭包捕获 session
         self.tools = await load_mcp_tools(session)
+        # 同步包装：ToolNode 在线程池线程执行，async 工具跨事件循环调用 session 会失败，
+        # 统一提交到当前（工具常驻）事件循环，与 session 创建循环保持一致（见 make_sync_tool）
+        # 传入 server_name 注入 tags，供 ToolFilter 规则层命中
+        server_name = self.cfg.get('name', '')
+        self.tools = [make_sync_tool(t, asyncio.get_running_loop(), server_name=server_name) for t in self.tools]
         # 同时保留按工具名的统一调用封装
         tools_result = await session.list_tools()
         for tool in tools_result.tools:

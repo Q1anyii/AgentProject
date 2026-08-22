@@ -28,7 +28,7 @@ class VectorStore(Protocol):
 
     def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict]) -> None: ...
 
-    def query(self, query_texts: list[str], n_results: int) -> list[list[RetrievedDoc]]: ...
+    def query(self, query_texts: list[str], n_results: int, distance_threshold: float) -> list[list[RetrievedDoc]]: ...
 
     def count(self) -> int: ...
 
@@ -46,7 +46,7 @@ class ChromaVectorStore:
     def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict]) -> None:
         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
-    def query(self, query_texts: list[str], n_results: int) -> list[list[RetrievedDoc]]:
+    def query(self, query_texts: list[str], n_results: int, distance_threshold: float = DISTANCE_THRESHOLD) -> list[list[RetrievedDoc]]:
         # chroma 同步阻塞调用丢线程池并发执行，避免多 query 串行拖慢检索
         with ThreadPoolExecutor(max_workers=min(max(len(query_texts), 1), 4)) as ex:
             raw_results = list(
@@ -64,7 +64,7 @@ class ChromaVectorStore:
                 res["documents"][0], res["distances"][0],
                 res["metadatas"][0], res["ids"][0],
             ):
-                if dist >= DISTANCE_THRESHOLD:
+                if dist >= distance_threshold:
                     continue
                 meta = dict(meta or {})  # 无元数据文档返回 None，兜底为空 dict（并拷贝避免污染原对象）
                 meta["_distance"] = dist  # 埋入元数据，用于 langsmith 调试看距离
@@ -109,18 +109,47 @@ class MilvusVectorStore:
             )
 
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """批量向量化：优先 langchain 接口，退化用 chroma 风格 __call__（单次调用即批量）。"""
+        """批量向量化：优先 langchain 接口，退化用 chroma 风格 __call__（单次调用即批量）。
+
+        输出统一归一为 list[list[float]]：chroma 风格返回 list[numpy.ndarray]，
+        langchain 风格返回 list[list[float]]，Milvus 需要纯 float 序列（struct.pack 要求）。
+        """
         fn = self.embedding_function
         if hasattr(fn, "embed_documents"):
-            return fn.embed_documents(texts)
-        return fn(texts)
+            vectors = fn.embed_documents(texts)
+        else:
+            vectors = fn(texts)
+        return [self._normalize_vector(v) for v in vectors]
+
+    @staticmethod
+    def _normalize_vector(v) -> list[float]:
+        """向量形态归一：兼容 [向量] 嵌套 / numpy 数组 / 原生列表 → list[float]。
+
+        判据：若 v 恰好含一个元素且该元素是序列（非标量），剥掉外层
+        （chroma 风格 embed_query 返回 [向量]，langchain 风格返回向量本身）；
+        再逐元素转 float，非数值元素抛出带上下文的结构化错误。
+        """
+        if len(v) == 1 and hasattr(v[0], "__len__"):
+            v = v[0]  # 剥掉外层： [向量] → 向量
+        try:
+            return [float(x) for x in v]
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                f"embedding 输出含非数值元素：{type(v)} 前几个元素={list(v)[:3]!r}"
+            ) from e
 
     def _embed_query(self, text: str) -> list[float]:
-        """单条向量化：优先 embed_query，退化用 __call__ 包一层取首个结果。"""
+        """单条向量化：优先 embed_query，退化用 __call__ 包一层取首个结果。
+
+        形态差异陷阱：chroma 风格的 embed_query 返回 [向量]（批量语义），
+        langchain 风格返回向量本身；统一经 _normalize_vector 归一为 list[float]。
+        """
         fn = self.embedding_function
         if hasattr(fn, "embed_query"):
-            return fn.embed_query(text)
-        return fn([text])[0]
+            v = fn.embed_query(text)
+        else:
+            v = fn([text])[0]
+        return self._normalize_vector(v)
 
     def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict]) -> None:
         from pymilvus import MilvusClient
@@ -132,7 +161,10 @@ class MilvusVectorStore:
         ]
         self.client.upsert(collection_name=self.collection_name, data=data)
 
-    def query(self, query_texts: list[str], n_results: int) -> list[list[RetrievedDoc]]:
+    def query(self, query_texts: list[str], n_results: int, distance_threshold: float = DISTANCE_THRESHOLD) -> list[list[RetrievedDoc]]:
+        # 同步实现：与 ChromaVectorStore / VectorStore 协议契约一致，
+        # 调用链（retrieve_graph / tool_filter / embedding）均为同步；
+        # 如需异步检索需全链路改造（AsyncMilvusClient + async 节点），见 toolsTODO 7.1
         from pymilvus import MilvusClient
 
         # ① embedding 前置：Milvus 不自动向量化查询文本
@@ -150,7 +182,7 @@ class MilvusVectorStore:
             retrieved: list[RetrievedDoc] = []
             for hit in hits_per_query:
                 distance = 1 - hit["distance"]  # ② COSINE similarity → 统一距离语义
-                if distance >= DISTANCE_THRESHOLD:
+                if distance >= distance_threshold:
                     continue
                 meta = hit["entity"].get("metadata")
                 if isinstance(meta, str):
