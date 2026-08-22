@@ -15,6 +15,7 @@ from graphs.main_graph import build_main_graph
 from graphs.retrieve_graph import build_retrieve_graph
 from init import COLLECTION_NAME, CustomPostgresSaver
 from service.cache_service import cache_service
+from service.file_upload_service import file_upload_service
 from vector.vector_store import create_vector_store
 
 
@@ -34,6 +35,9 @@ class ChatService:
         self.retrieve_graph = None     # 改写+重排图
         self.cache = None
         self.redis_client = None
+        # 上传文件解析内容缓存：key="{user_id}:{file_id}"，value={"name":..., "content":...}
+        # 上传后立即解析并存入，发送消息时从缓存读取拼接到 input_str，避免重复解析
+        self._file_content_cache: dict[str, dict] = {}
 
     def open(self, mcp_tools: list | None = None):
         self.vector_store = create_vector_store(load_vector_db_config())
@@ -89,7 +93,116 @@ class ChatService:
         """异步版 invoke：同步调用丢进线程池，不阻塞事件循环。"""
         return await asyncio.to_thread(self.invoke, user_id, thread_id, input_str)
 
-    def stream(self, user_id, thread_id, input_str, user_info=None):
+    def parse_and_cache_file(self, file_id: int, user_id: str) -> dict:
+        """上传文件后立即解析文本内容并缓存（阻塞执行，解析完成才返回）。
+
+        支持 txt/md/csv/json/xml/html/py/js 等纯文本格式；PDF/docx 等二进制格式
+        暂不支持解析，返回 content=None。解析结果存入 _file_content_cache，
+        发送消息时从缓存读取拼接到 input_str。
+
+        Args:
+            file_id: 文件 ID（上传接口返回）
+            user_id: 用户 ID
+
+        Returns:
+            {"file_id": int, "file_name": str, "content": str|None, "parsed": bool}
+        """
+        cache_key = f"{user_id}:{file_id}"
+        # 已缓存则直接返回，避免重复解析
+        if cache_key in self._file_content_cache:
+            return self._file_content_cache[cache_key]
+
+        # 获取文件元信息
+        file_info = file_upload_service.get_file(file_id, user_id)
+        file_name = file_info.get("file_name", f"file_{file_id}") if file_info else f"file_{file_id}"
+
+        # 解析文本内容
+        content = file_upload_service.extract_text_from_file(file_id, user_id)
+        parsed = content is not None and len(content) > 0
+
+        result = {
+            "file_id": file_id,
+            "file_name": file_name,
+            "content": content if parsed else None,
+            "parsed": parsed,
+        }
+        self._file_content_cache[cache_key] = result
+        logger.info(f"文件解析完成 file_id={file_id}, user_id={user_id}, parsed={parsed}, content_len={len(content) if content else 0}")
+        return result
+
+    def _build_input_with_files(self, input_str: str, file_ids: list[int], user_id: str) -> str:
+        """将用户输入与上传文件解析内容拼接，作为最终 input_str 传入 llm_node。
+
+        拼接格式：
+            用户输入：{input_str}
+
+            --- 以下为用户上传的文件内容 ---
+            【文件名1】
+            {文件内容1}
+
+            【文件名2】
+            {文件内容2}
+
+        Args:
+            input_str: 用户原始输入
+            file_ids: 上传文件 ID 列表
+            user_id: 用户 ID
+
+        Returns:
+            拼接后的完整输入文本
+        """
+        if not file_ids:
+            return input_str
+
+        file_sections = []
+        for fid in file_ids:
+            cache_key = f"{user_id}:{fid}"
+            cached = self._file_content_cache.get(cache_key)
+            # 缓存未命中则实时解析（兜底）
+            if not cached:
+                cached = self.parse_and_cache_file(fid, user_id)
+            if cached.get("parsed") and cached.get("content"):
+                file_sections.append(f"【{cached['file_name']}】\n{cached['content']}")
+
+        if not file_sections:
+            return input_str
+
+        file_block = "--- 以下为用户上传的文件内容 ---\n" + "\n\n".join(file_sections)
+        if input_str.strip():
+            return f"{input_str}\n\n{file_block}"
+        return file_block
+
+    def clear_file_cache(self, user_id: str, file_id: int = None):
+        """清除文件解析缓存（删除文件时调用）。
+
+        Args:
+            user_id: 用户 ID
+            file_id: 文件 ID，None 表示清除该用户所有缓存
+        """
+        if file_id is not None:
+            self._file_content_cache.pop(f"{user_id}:{file_id}", None)
+        else:
+            keys_to_remove = [k for k in self._file_content_cache if k.startswith(f"{user_id}:")]
+            for k in keys_to_remove:
+                del self._file_content_cache[k]
+
+    def stream(self, user_id, thread_id, input_str, user_info=None, file_ids: list[int] = None):
+        """流式对话生成。
+
+        Args:
+            user_id: 用户 ID
+            thread_id: 会话 ID
+            input_str: 用户输入文本
+            user_info: 用户上下文信息
+            file_ids: 上传文件 ID 列表，解析内容会拼接到 input_str 传入 llm_node
+        """
+        # 拼接用户输入与上传文件解析内容（文件内容作为上下文传入 LLM）
+        if file_ids:
+            input_str = self._build_input_with_files(input_str, file_ids, user_id)
+            logger.info(f"拼接文件内容后 input_str 长度: {len(input_str)}, 文件数: {len(file_ids)}")
+            # 文件内容已拼入本次消息，清除内存解析缓存避免累积（数据库文件记录保留）
+            for fid in file_ids:
+                self._file_content_cache.pop(f"{user_id}:{fid}", None)
 
         def make_serializable(obj):
             # 处理 LangChain 消息对象

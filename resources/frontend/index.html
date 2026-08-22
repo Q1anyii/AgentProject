@@ -1693,29 +1693,64 @@
         .uploaded-files {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 10px;
-            justify-content: flex-start;
+            gap: 10px;
+            margin-bottom: 12px;
+            justify-content: center;
         }
-        .uploaded-file-tag {
-            display: inline-flex;
+        .uploaded-file-card {
+            display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 5px 12px;
-            background: var(--accent-light);
-            color: var(--accent);
-            border-radius: var(--radius-full);
-            font-size: 12px;
-            max-width: 200px;
+            gap: 10px;
+            padding: 8px 14px 8px 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            min-width: 140px;
+            max-width: 240px;
+            position: relative;
         }
-        .uploaded-file-tag .remove {
+        .uploaded-file-card .file-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: rgba(46, 160, 67, 0.15);
+            color: #2ea043;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .uploaded-file-card .file-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+        .uploaded-file-card .file-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .uploaded-file-card .file-type {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .uploaded-file-card .remove {
             cursor: pointer;
-            opacity: 0.7;
-            font-size: 14px;
+            opacity: 0.6;
+            font-size: 16px;
             line-height: 1;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+            padding: 2px;
         }
-        .uploaded-file-tag .remove:hover {
+        .uploaded-file-card .remove:hover {
             opacity: 1;
+            color: var(--danger, #e5484d);
         }
         .upload-dropdown {
             position: absolute;
@@ -1962,11 +1997,27 @@
             }
         }
 
-        async function apiChat(query, threadId, onStream, signal, onToolCall) {
+        // 获取用户个人信息（含 avatar、assistant_style、theme）
+        async function apiGetProfile(userId) {
+            const response = await fetch(`${API_BASE}/api/users/${userId}/profile`, {
+                headers: authHeaders()
+            });
+            syncTokenFromHeaders(response.headers);
+            handleAuthError(response);
+            if (!response.ok) return null;
+            const { ok, data } = await parseApiResponse(response);
+            return ok ? data : null;
+        }
+
+        async function apiChat(query, threadId, onStream, signal, onToolCall, fileIds) {
+            const body = { query, thread_id: threadId };
+            if (fileIds && fileIds.length > 0) {
+                body.file_ids = fileIds;
+            }
             const response = await fetch(`${API_BASE}/api/chat/`, {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ query, thread_id: threadId }),
+                body: JSON.stringify(body),
                 signal: signal,
             });
             syncTokenFromHeaders(response.headers);
@@ -2157,12 +2208,22 @@
                         if (ok && data.user_info) {
                             // 只存展示所需字段并剔除密码等敏感信息，避免整行落 localStorage
                             const u = data.user_info;
-                            cache.set(STORAGE_KEY.USER, {
+                            const userData = {
                                 userId: u.userId ?? u.user_id,
                                 name: u.name ?? u.username ?? u.userName,
                                 role: u.role || '学员',
                                 token: data.token
-                            });
+                            };
+                            // 登录后获取用户 profile（含 avatar），避免重新登录后头像失效
+                            try {
+                                const profile = await apiGetProfile(userData.userId);
+                                if (profile && profile.avatar) {
+                                    userData.avatar = profile.avatar;
+                                }
+                            } catch (e) {
+                                // profile 获取失败不影响登录，头像使用默认
+                            }
+                            cache.set(STORAGE_KEY.USER, userData);
                             updateLastActive();
                             this.$router.push('/chat');
                         } else {
@@ -2529,13 +2590,18 @@
                         </div>
 
                         <div class="input-area">
-                            <!-- 已上传文件列表（输入框上方，从左到右排列） -->
+                            <!-- 已上传文件列表（输入框上方，卡片式，从左到右排列） -->
                             <div v-if="uploadedFiles.length > 0" class="uploaded-files">
-                                <span v-for="(file, idx) in uploadedFiles" :key="idx" class="uploaded-file-tag">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                                    {{ file.name }}
+                                <div v-for="(file, idx) in uploadedFiles" :key="idx" class="uploaded-file-card">
+                                    <div class="file-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                                    </div>
+                                    <div class="file-info">
+                                        <span class="file-name">{{ file.name }}</span>
+                                        <span class="file-type">File</span>
+                                    </div>
                                     <span class="remove" @click="removeUploadedFile(idx)">×</span>
-                                </span>
+                                </div>
                             </div>
                             <div class="input-card">
                                 <textarea
@@ -2945,7 +3011,9 @@
 
                 const sendMessage = async () => {
                     const content = inputText.value.trim();
-                    if (!content || isLoading.value) return;
+                    // 有文件时允许空消息（纯文件发送），无文件时必须输入文字
+                    const hasFiles = uploadedFiles.value.length > 0;
+                    if ((!content && !hasFiles) || isLoading.value) return;
 
                     if (!currentThreadId.value) {
                         createNewSession();
@@ -2953,11 +3021,23 @@
 
                     const session = sessions.value.find(s => s.id === currentThreadId.value);
 
-                    const userMsg = { id: generateId(), role: 'user', content, time: formatTime() };
+                    // 发送前提取 fileIds 并立即清空附件区（防止重复发送）
+                    const pendingFileIds = uploadedFiles.value
+                        .map(f => f.file_id)
+                        .filter(id => id != null);
+                    const pendingFileNames = uploadedFiles.value.map(f => f.name);
+                    uploadedFiles.value = [];
+
+                    // 用户消息：文本 + 附件文件名展示
+                    const displayContent = content + (pendingFileNames.length > 0
+                        ? '\n\n📎 ' + pendingFileNames.map(n => `[${n}]`).join(' ')
+                        : '');
+                    const userMsg = { id: generateId(), role: 'user', content: displayContent, time: formatTime() };
                     messages.value.push(userMsg);
 
                     if (session && session.title === '新会话') {
-                        session.title = content.length > 20 ? content.slice(0, 20) + '...' : content;
+                        const titleText = content || (pendingFileNames.length > 0 ? `📎 ${pendingFileNames[0]}` : '新会话');
+                        session.title = titleText.length > 20 ? titleText.slice(0, 20) + '...' : titleText;
                     }
                     if (session) {
                         session.isBlank = false;
@@ -2992,6 +3072,7 @@
                         // 创建 AbortController 用于停止回复
                         abortController.value = new AbortController();
 
+                        // file_ids 已在发送前提取（pendingFileIds），附件区已清空
                         const answer = await apiChat(content, currentThreadId.value, (text) => {
                             streaming.value = true;
                             latestText = text;
@@ -3015,7 +3096,7 @@
                             } else if (toolEvent.type === 'end') {
                                 currentToolCall.value = null;
                             }
-                        });
+                        }, pendingFileIds);
 
                         // 流结束：清掉未触发的节流器，确保最终内容一次性落库渲染
                         if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
@@ -3040,6 +3121,14 @@
                         }
                         messages.value.pop();
                         saveMessages();
+                        // 发送失败：恢复附件列表，让用户可以重试
+                        if (pendingFileIds.length > 0) {
+                            uploadedFiles.value = pendingFileIds.map((id, i) => ({
+                                name: pendingFileNames[i] || `file_${id}`,
+                                size: 0,
+                                file_id: id,
+                            }));
+                        }
                         if (err && err.status === 403) {
                             // 会话被判定为他人所有：从列表移除并新建会话，不再复用该 thread
                             const removed = currentThreadId.value;

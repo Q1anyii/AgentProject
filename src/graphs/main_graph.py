@@ -156,7 +156,9 @@ def build_main_graph(retrieve_graph,
         return profile
 
     def llm_node(state: OverAllState, config: RunnableConfig, store: BaseStore) -> OverAllState:
+        logger.success("llm_node is runed")
         input_str = state["input_str"]
+        print(input_str)
         retrieval_res = state.get("retrieve_res")
 
 
@@ -234,10 +236,19 @@ def build_main_graph(retrieve_graph,
         chunks = []
         for chunk in model_with_tools.stream(messages):
             chunks.append(chunk)
-        content = "".join(c.content for c in chunks if isinstance(c.content, str))
-        # 工具调用：模型可能返回 tool_calls（跨 chunk 累积，取最后一个完整结果），
-        # 有 tool_calls 时由 route_after_llm 交给 ToolNode 执行，再回到本节点生成最终回答
-        tool_calls = chunks[-1].tool_calls if chunks else []
+        # 合并所有 chunk：流式模式下 tool_calls 分块传输（首块含 name/id，后续块含 arguments 分片），
+        # 最后一个 chunk 的 tool_calls 通常为空（只有 finish_reason），
+        # 必须用 AIMessageChunk.__add__ 累积合并，否则工具调用会被丢弃导致 tool_calls=[]
+        final_chunk = None
+        for c in chunks:
+            final_chunk = c if final_chunk is None else final_chunk + c
+        content = final_chunk.content if final_chunk else ""
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        tool_calls = final_chunk.tool_calls if final_chunk else []
         logger.info(
             f"llm_node 生成完成：tool_calls={[tc['name'] for tc in tool_calls]} "
             f"content_len={len(content)}"

@@ -101,9 +101,11 @@ pytest==9.0.3
 
 # =========================================================
 # RAG / 向量数据库 / 数据库连接
-# 作用：ChromaDB 向量库、PostgreSQL 检查点、MySQL 用户库、Redis 缓存
-# 注意：当前项目使用 ChromaDB，不使用 Milvus
+# 作用：Milvus 向量库（当前默认）、ChromaDB（可插拔备选）、PostgreSQL 检查点、
+#       MySQL 用户库、Redis 缓存
+# 注意：vector_store.py 通过 Protocol 抽象，Milvus/Chroma 可通过 vector_db.json 切换
 # =========================================================
+pymilvus==2.6.12
 chromadb==1.5.9
 psycopg[binary]==3.3.3
 psycopg-pool==3.3.0
@@ -212,5 +214,4 @@ addict==2.4.0
 # langchain-tavily==0.2.17                   # Tavily 联网搜索
 
 # --- 其他向量数据库 ---
-# langchain-milvus==0.3.3                    # Milvus 向量库（当前使用 ChromaDB）
-# pymilvus==2.6.12
+# langchain-milvus==0.3.3                    # Milvus LangChain 集成（项目直接用 pymilvus，不需要）

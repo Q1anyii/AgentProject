@@ -18,8 +18,8 @@ load_dotenv(override=True)
 model = init_chat_model(
     model="deepseek-v4-flash",  # 指定混元模型，如 hunyuan-turbos-latest[reference:4]
     model_provider="openai",  # 关键：使用 OpenAI 兼容模式
-    api_key=os.getenv("DEEPSEEK_API_KEY"),  # 你的混元 API Key
-    base_url="https://api.deepseek.com",  # 混元的 Base URL[reference:5]
+    api_key=os.getenv("HUNYUAN_API_KEY"),  # 你的混元 API Key
+    base_url="https://tokenhub.tencentmaas.com/v1",  # 混元的 Base URL[reference:5]
 )
 
 selector_llm = init_chat_model(

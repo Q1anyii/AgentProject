@@ -22,10 +22,10 @@ async def get_current_user(user_id: str) -> dict:
     row = login_service.get_user_by_id(user_id)
     return {"user_id": row["user_id"], "username": row["username"], "create_time": row["create_time"]} | {"error": "用户不存在"}
 
-@mcp.tool()
-async def summarize(thread_id: str, user_id: str) -> str:
-    """按会话压缩上下文：取 checkpointer 历史（chat_service.get_history_session）交给 model 压缩"""
-    ...
+# @mcp.tool()
+# async def summarize(thread_id: str, user_id: str) -> str:
+#     """按会话压缩上下文：取 checkpointer 历史（chat_service.get_history_session）交给 model 压缩"""
+#     ...
 
 
 if __name__ == "__main__":

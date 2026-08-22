@@ -80,7 +80,8 @@ class EmbeddingProcessor:
     @staticmethod
     def load_docs(file_path) -> list[Document]:
         """按后缀加载文档：.md 按标题切分，.txt/.pdf 原样加载。"""
-        suffix = Path(file_path).suffix  # 带点后缀，如 ".md"，与 case 分支对齐
+        # suffix 转小写，避免 .PDF 大写不匹配 case 分支
+        suffix = Path(file_path).suffix.lower()
         parent_docs: list[Document] = []
 
         match suffix:
@@ -88,7 +89,7 @@ class EmbeddingProcessor:
                 # 注意：不能用 UnstructuredMarkdownLoader——它会解析掉 markdown 语法（# 标题 → 纯文本），
                 # 导致后续 MarkdownHeaderTextSplitter 找不到 # 标记，切分结果为空（入库 0 条）。
                 # 改用 TextLoader 读取原始 markdown 文本，保留 # 标题标记。
-                loader = TextLoader(file_path, encoding="utf-8")
+                loader = TextLoader(str(file_path), encoding="utf-8")
                 docs = loader.load()
                 headers_to_split_on = [
                     ("#", "Header 1"),
@@ -99,14 +100,16 @@ class EmbeddingProcessor:
                 parent_docs = splitter.split_text(document)
                 # 兜底：文档无 # / ## 标题时，按标题切分结果为空，直接用原始文档
                 if not parent_docs:
-                    logger.warning(f"{file_path.name} 无 # / ## 标题，跳过标题切分，直接按 chunk 切分")
+                    logger.warning(f"{Path(file_path).name} 无 # / ## 标题，跳过标题切分，直接按 chunk 切分")
                     parent_docs = docs
             case ".txt":
-                parent_docs = TextLoader(file_path).load()
+                parent_docs = TextLoader(str(file_path), encoding="utf-8").load()
             case ".pdf":
-                parent_docs = PyPDFLoader(file_path).load()
+                # PyPDFLoader 要求字符串路径，Path 对象在某些版本下会报 ValueError
+                loader = PyPDFLoader(str(file_path))
+                parent_docs = loader.load()
             case _:
-                logger.error("暂不支持解析该类文档")
+                logger.error(f"暂不支持解析该类文档: {suffix}")
 
         return parent_docs
 
@@ -115,6 +118,9 @@ class EmbeddingProcessor:
         """加载后按 chunk 大小切分为子文档。"""
         try:
             parent_docs = EmbeddingProcessor.load_docs(file_path=file_path)
+            if not parent_docs:
+                logger.warning(f"{Path(file_path).name} 加载结果为空，可能是不支持的格式或文件损坏")
+                return None
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=CHUNK_SIZE,
                 chunk_overlap=CHUNK_OVERLAP,
@@ -122,6 +128,11 @@ class EmbeddingProcessor:
             return text_splitter.split_documents(parent_docs)
         except FileNotFoundError as e:
             logger.error(f"路径文件不存在：{e}")
+            return None
+        except Exception as e:
+            # PyPDFLoader 加载 PDF 失败时抛 ValueError/PdfReadError，
+            # 统一捕获避免单文件失败导致整个入库脚本崩溃
+            logger.error(f"文档解析失败 [{Path(file_path).name}]: {type(e).__name__}: {e}")
             return None
 
     # ---------- 同步入口 ----------

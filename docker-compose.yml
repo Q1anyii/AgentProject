@@ -1,6 +1,7 @@
 # ============================================================
-# docker-compose.yml — 米塔 AI 智能助理一键部署
-# 启动：docker-compose up -d
+# docker-compose.yml — Mitta AI 智能助理一键部署
+# 启动全部服务：docker-compose up -d
+# 仅启动基础设施：docker-compose up -d postgres mysql redis etcd minio milvus
 # 停止：docker-compose down
 # 查看日志：docker-compose logs -f api
 # ============================================================
@@ -9,63 +10,130 @@ version: "3.8"
 
 services:
   # ==================== PostgreSQL ====================
-  # LangGraph Checkpointer（会话状态）+ Store（长期记忆）
+  # LangGraph Checkpointer（会话状态/短期记忆）+ Store（长期记忆/用户档案）
   postgres:
     image: postgres:16-alpine
     container_name: mitta-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-mitta}
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-1234}
+      POSTGRES_DB: ${POSTGRES_DB:-agentproject}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-root}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ==================== MySQL ====================
-  # 用户表 userInfo（登录/注册/密码找回）
+  # 用户表 userInfo（登录/注册）+ user_profile（扩展信息）+ user_files（上传文件）
   mysql:
     image: mysql:8.0
     container_name: mitta-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-Mitta}
-      MYSQL_USER: ${MYSQL_USER:-mitta}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mitta}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-mitta}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password --character-set-mcp_server=utf8mb4 --collation-mcp_server=utf8mb4_unicode_ci
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-1234}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ==================== Redis ====================
-  # 检索缓存 + JWT 登录态（access/refresh token）
+  # ==================== Redis（含 RedisSearch 模块） ====================
+  # 节点级缓存 + 检索缓存（CacheService 使用 FT.CREATE/FT.SEARCH）+ JWT 登录态 + 限流计数
+  # 必须使用 redis-stack 镜像（含 RedisSearch/RedisJSON 模块），标准 redis 镜像不支持 FT.* 命令
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack:7.2.0-v10
     container_name: mitta-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
+      - "8001:8001"  # RedisInsight Web UI（可选，调试用）
     volumes:
       - redis_data:/data
-    command: redis-mcp_server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      REDIS_ARGS: "--appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ==================== Milvus 依赖：etcd ====================
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    container_name: mitta-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ==================== Milvus 依赖：MinIO ====================
+  minio:
+    image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+    container_name: mitta-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ==================== Milvus 向量库 ====================
+  # 知识库向量 + 工具向量（MCP_TOOLS 集合）
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    container_name: mitta-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
 
   # ==================== 后端 API ====================
   api:
@@ -78,14 +146,24 @@ services:
       - "8000:8000"
     environment:
       # 数据库连接串（容器内使用服务名作为主机名）
-      POSTGRESQL_DB_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mitta}
-      MYSQL_DB_URL: mysql+pymysql://${MYSQL_USER:-mitta}:${MYSQL_PASSWORD:-mitta}@mysql:3306/${MYSQL_DATABASE:-Mitta}
+      POSTGRESQL_DB_URL: postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-1234}@postgres:5432/${POSTGRES_DB:-agentproject}?sslmode=disable
+      MYSQL_DB_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-1234}@mysql:3306/${MYSQL_DATABASE:-mitta}
       REDIS_DB_URL: redis://redis:6379/0
-      # LLM 配置（从 .env 读取，不在此处硬编码）
+      # 大模型配置（从 .env 读取，不在此处硬编码）
+      HUNYUAN_API_KEY: ${HUNYUAN_API_KEY}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
       SILICONFLOW_BASE_URL: ${SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      # JWT
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      # LangSmith（可选）
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-AgentProject}
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,11 +171,36 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_healthy
     volumes:
-      # 挂载 chroma_db 数据目录（持久化向量库）
-      - ./resources/chroma_db:/app/resources/chroma_db
+      # 挂载 MCP 配置和 System Prompt（修改后重启容器生效）
+      - ./resources/config:/app/resources/config
+      - ./resources/system_prompt:/app/resources/system_prompt
       # 挂载日志目录
       - ./logs:/app/logs
+
+  # ==================== 前端 Nginx ====================
+  # 静态文件托管 + API 反向代理（SSE 缓冲关闭）
+  # 注意：nginx.conf 中的 root 和 upstream 是本地开发路径，
+  # 容器启动时通过 sed 替换为容器内路径
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mitta-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./resources/frontend:/usr/share/nginx/html:ro
+      - ./resources/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    command: >
+      /bin/sh -c "sed -i
+      -e 's|E:/工作文件/AgentProject/resources/frontend|/usr/share/nginx/html|g'
+      -e 's|127.0.0.1:8000|api:8000|g'
+      /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    depends_on:
+      - api
 
 # ==================== 数据卷 ====================
 volumes:
@@ -106,4 +209,10 @@ volumes:
   mysql_data:
     driver: local
   redis_data:
+    driver: local
+  etcd_data:
+    driver: local
+  minio_data:
+    driver: local
+  milvus_data:
     driver: local

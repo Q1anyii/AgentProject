@@ -40,7 +40,16 @@ class CacheService:
     def __init__(self, redis_db_url: str = REDIS_DB_URL, index_name:str = INDEX_NAME, cache_ttl = CACHE_DEFAULT_TTL):
         self.db_url = redis_db_url or os.getenv("REDIS_DB_URL")
         self.host, self.port, self.password = self.parse_url(self.db_url)
-        self.redis = redis.Redis(host=self.host, port= self.port, password=self.password)
+        self.redis = redis.Redis(
+            host=self.host,
+            port=self.port,
+            password=self.password,
+            # 超时保护：Redis 半开/卡顿时快速失败，避免 mget 等操作挂起数十秒。
+            # 实测无超时下 TCP 半开会挂起约 34 秒（LangGraph 节点缓存 RedisCache.get
+            # 每次节点到达都会 mget），导致 SSE 流长时间无事件、前端超时中断丢消息。
+            socket_timeout=3,
+            socket_connect_timeout=3,
+        )
         self.index_name = index_name
         self._lsh = None      # LSH 模型复用：planes 必须固定，否则同一 query 每次映射不同 bucket，缓存 key 无限膨胀
         self._lsh_dim = 0
@@ -115,14 +124,19 @@ class CacheService:
         query_vector = self.query_to_vector(query_text)
         key = self.set_key(thread_id, query_vector)
         serializable_result = documents_to_dicts(result)
-        self.redis.hset(key, mapping={
-            "thread_id": thread_id,  # 索引的 Tag 字段，query_cache 按它过滤（缺失会导致 KNN 永远查不到）
-            "query_embedding": np.array(query_vector, dtype=np.float32).tobytes(),  # 必须转换为二进制
-            "query_text": query_text,
-            "result": json.dumps(serializable_result, ensure_ascii=False),
-            "created_at": time.time()
-        })
-        self.redis.expire(key, self.cache_ttl)
+        try:
+            # 缓存是优化而非正确性依赖：Redis 不可用/超时（socket_timeout=3）时
+            # 跳过写入，不让缓存失败阻塞检索主链路
+            self.redis.hset(key, mapping={
+                "thread_id": thread_id,  # 索引的 Tag 字段，query_cache 按它过滤（缺失会导致 KNN 永远查不到）
+                "query_embedding": np.array(query_vector, dtype=np.float32).tobytes(),  # 必须转换为二进制
+                "query_text": query_text,
+                "result": json.dumps(serializable_result, ensure_ascii=False),
+                "created_at": time.time()
+            })
+            self.redis.expire(key, self.cache_ttl)
+        except Exception as e:
+            logger.warning(f"缓存写入失败，跳过（不影响主链路）：{e}")
 
     def query_cache(self, thread_id: str, query: str, top_k: int = 3) -> List[Document] | None:
         query_vector = self.query_to_vector(query)
@@ -139,7 +153,12 @@ class CacheService:
 
         # 执行查询，传入向量参数
         params = {"vec": query_bytes}
-        res = self.redis.ft(self.index_name).search(q, query_params=params)
+        try:
+            res = self.redis.ft(self.index_name).search(q, query_params=params)
+        except Exception as e:
+            # 缓存是优化而非正确性依赖：Redis 不可用/超时按未命中降级，不阻塞检索主链路
+            logger.warning(f"缓存查询失败，按未命中处理：{e}")
+            return None
 
         if not res.docs:
             return None
